@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="spentaLeafMarkGrad" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#134E32" />
+      <stop offset="48%" stop-color="#189350" />
+      <stop offset="82%" stop-color="#B91C2E" />
+      <stop offset="100%" stop-color="#DC2638" />
+    </linearGradient>
+    <clipPath id="spentaLeafMarkClip">
+      <path d="M9 54 C5 30, 18 9, 57 7 C59 38, 40 57, 9 54 Z" />
+    </clipPath>
+  </defs>
+
+  <path
+    d="M9 54 C5 30, 18 9, 57 7 C59 38, 40 57, 9 54 Z"
+    fill="url(#spentaLeafMarkGrad)"
+  />
+
+  <g clip-path="url(#spentaLeafMarkClip)" stroke="#FFFFFF" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <!-- Left vertical branch to node -->
+    <path d="M12 49 L19 42 L19 33" />
+    <circle cx="19" cy="29" r="3.4" />
+
+    <!-- Main central spine to top-right node -->
+    <path d="M9 54 L26 38 L35 38 L44 29 L44 20" />
+    <circle cx="44" cy="16.2" r="3.4" />
+
+    <!-- Middle center node -->
+    <circle cx="30.5" cy="29" r="3.4" />
+
+    <!-- Lower horizontal branch in crimson belly -->
+    <path d="M20 53 L29 44 L40 44" />
+    <circle cx="43.8" cy="44" r="3.4" />
+  </g>
+</svg>
