@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Activity,
   ArrowUp,
+  Check,
   FolderLock,
+  Link2,
   Mail,
   Presentation,
   Share2,
@@ -10,6 +12,7 @@ import {
 import { BRIEFING_CHAPTERS } from '../../../data/unifiedSsotData';
 import { useStack } from '../../../store/StackContext';
 import { useSsotBriefing } from '../context/SsotBriefingContext';
+import { buildInvestorBriefingShareUrl, copyTextWithFallback } from '../../../utils/shareUrlCodec';
 
 const RAIL_NODES = [
   { id: 'ssot-hero', num: '00', label: 'Executive Hero & 3D Stack' },
@@ -21,10 +24,20 @@ const RAIL_NODES = [
 ];
 
 export function SectionNavigator() {
-  const { setDataRoomOpen, openIntelligenceModal, openContactModal } = useStack();
+  const {
+    currency,
+    personaTrack,
+    investorCalculatorState,
+    setAutoNotice,
+    setDataRoomOpen,
+    openIntelligenceModal,
+    openContactModal,
+  } = useStack();
   const {
     activeSectionId,
     scrollToSection,
+    fusionViewMode,
+    sessionSid,
     setShareModalOpen,
     setPitchDeckModalOpen,
   } = useSsotBriefing();
@@ -33,6 +46,42 @@ export function SectionNavigator() {
     label: string;
     y: number;
   } | null>(null);
+  const [copiedLink, setCopiedLink] = useState<boolean>(false);
+  const copyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyDeepLink = async () => {
+    const deepLinkUrl = buildInvestorBriefingShareUrl({
+      section: activeSectionId,
+      persona: personaTrack,
+      scenario: investorCalculatorState.scenario,
+      currency,
+      view: fusionViewMode,
+      sid: sessionSid,
+    });
+    const ok = await copyTextWithFallback(deepLinkUrl);
+    if (ok) {
+      setCopiedLink(true);
+      setAutoNotice(
+        `Copied briefing link (${activeSectionId} · ${personaTrack} · ${investorCalculatorState.scenario})`,
+      );
+      if (copyTimerRef.current) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        setCopiedLink(false);
+      }, 2200);
+    } else {
+      setShareModalOpen(true);
+    }
+  };
 
   return (
     <>
@@ -130,9 +179,41 @@ export function SectionNavigator() {
 
           <button
             type="button"
+            data-testid="section-navigator-copy-link"
+            onClick={() => void handleCopyDeepLink()}
+            onMouseEnter={(e) =>
+              setHoveredTooltip({
+                label: copiedLink
+                  ? 'Copied Briefing Link!'
+                  : `Copy Link (${activeSectionId} · ${personaTrack} · ${investorCalculatorState.scenario})`,
+                y: e.clientY,
+              })
+            }
+            onMouseMove={(e) =>
+              setHoveredTooltip({
+                label: copiedLink
+                  ? 'Copied Briefing Link!'
+                  : `Copy Link (${activeSectionId} · ${personaTrack} · ${investorCalculatorState.scenario})`,
+                y: e.clientY,
+              })
+            }
+            onMouseLeave={() => setHoveredTooltip(null)}
+            aria-label="Copy Link"
+            title="Copy Link with active section, persona, and scenario"
+            className={`w-7 h-7 rounded-lg flex items-center justify-center cursor-pointer transition-colors ${
+              copiedLink
+                ? 'bg-[#1C6E46] text-white dark:bg-[#6FCB9F] dark:text-[#0B1020]'
+                : 'text-[#0891B2] dark:text-[#22D3EE] hover:bg-[#0891B2]/10 dark:hover:bg-[#22D3EE]/10'
+            }`}
+          >
+            {copiedLink ? <Check className="w-3.5 h-3.5" /> : <Link2 className="w-3.5 h-3.5" />}
+          </button>
+
+          <button
+            type="button"
             onClick={() => setShareModalOpen(true)}
             onMouseEnter={(e) =>
-              setHoveredTooltip({ label: 'Share Deep Link', y: e.clientY })
+              setHoveredTooltip({ label: 'Share Deep Link Options', y: e.clientY })
             }
             onMouseLeave={() => setHoveredTooltip(null)}
             aria-label="Share Briefing"

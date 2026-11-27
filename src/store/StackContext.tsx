@@ -46,9 +46,14 @@ import {
 } from '../utils/LocalPersistenceService';
 import {
   ArPreviewTarget,
+  BRIEFING_CHAPTERS,
+  DATA_ROOM_DOCUMENTS,
   DEFAULT_SSOT_FX_RATE,
   InvestorPersonaTrack,
+  NINE_TIER_UNIT_ECONOMICS,
+  SSOT_CASE_STUDIES,
   SsotCurrency,
+  UNIFIED_SAFE_TERMS,
 } from '../data/unifiedSsotData';
 
 export type InvestorCalculatorState = Omit<PersistedInvestorCalculatorState, 'updatedAt'>;
@@ -610,6 +615,7 @@ interface StackContextValue {
   getStorageMetrics: () => Promise<PersistenceStorageMetrics>;
   clearLocalCachedData: () => Promise<void>;
   exportOfflineBackup: () => Promise<void>;
+  investorBriefingCachedAt: string | null;
 }
 
 const StackContext = createContext<StackContextValue | null>(null);
@@ -1025,6 +1031,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     }),
   );
   const [investorCalculatorHydrated, setInvestorCalculatorHydrated] = useState<boolean>(false);
+  const [investorBriefingCachedAt, setInvestorBriefingCachedAt] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(() => persistenceService.getSyncState().isOnline);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(() => persistenceService.getSyncState().lastSyncedAt);
@@ -1032,6 +1039,8 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
   const [observedSyncStatus, setObservedSyncStatus] = useState<SyncStatus>(() => persistenceService.getSyncState().status);
   const activeSyncOpsRef = useRef<number>(0);
   const clearGuardUntilRef = useRef<number>(0);
+  const pendingOfflineSyncRef = useRef<boolean>(false);
+  const forceSyncRef = useRef<(() => Promise<boolean>) | null>(null);
 
   useEffect(() => {
     return persistenceService.subscribe((snapshot) => {
@@ -1481,6 +1490,36 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     return persistenceService.getStorageMetrics();
   }, [persistenceService]);
 
+  const buildInvestorBriefingCacheInput = useCallback(
+    () => ({
+      chaptersCount: BRIEFING_CHAPTERS.length,
+      tiersCount: NINE_TIER_UNIT_ECONOMICS.length,
+      caseStudiesCount: SSOT_CASE_STUDIES.length,
+      dataRoomDocsCount: DATA_ROOM_DOCUMENTS.length,
+      safeTermsSnapshot: UNIFIED_SAFE_TERMS,
+      activeSection: ssotQueryState.section || 'ssot-hero',
+      personaTrack,
+      currency,
+      scenario: investorCalculatorState.scenario,
+      bookmarkedDocIds,
+      feedbackCount: investorFeedback.length,
+      payload: {
+        chapters: BRIEFING_CHAPTERS,
+        tiers: NINE_TIER_UNIT_ECONOMICS,
+        caseStudies: SSOT_CASE_STUDIES,
+        dataRoomDocs: DATA_ROOM_DOCUMENTS,
+      },
+    }),
+    [
+      ssotQueryState.section,
+      personaTrack,
+      currency,
+      investorCalculatorState.scenario,
+      bookmarkedDocIds,
+      investorFeedback.length,
+    ],
+  );
+
   const forceSync = useCallback(async (): Promise<boolean> => {
     const currentlyOnline =
       typeof navigator !== 'undefined' && typeof navigator.onLine === 'boolean'
@@ -1489,6 +1528,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     persistenceService.setOnlineStatus(currentlyOnline);
     setIsOnline(currentlyOnline);
     if (!currentlyOnline) {
+      pendingOfflineSyncRef.current = true;
       setAutoNotice('Offline mode — changes remain safely queued in local IndexedDB until connection returns');
       return false;
     }
@@ -1496,7 +1536,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     clearGuardUntilRef.current = 0;
     const reconciliation = await runTrackedPersistence(
       async () => {
-        await Promise.all([
+        const [, , , , cachedBriefing] = await Promise.all([
           persistenceService.saveCalculatorState(investorCalculatorState),
           persistenceService.saveWorkspaceSnapshot({
             id: DEFAULT_WORKSPACE_SNAPSHOT_KEY,
@@ -1520,7 +1560,9 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
             currency,
             bookmarkedDocIds,
           }),
+          persistenceService.saveInvestorBriefingCache(buildInvestorBriefingCacheInput()),
         ]);
+        setInvestorBriefingCachedAt(cachedBriefing.cachedAt);
         const result = await persistenceService.reconcileAndVerify();
         const [scenarios, snapshots] = await Promise.all([
           persistenceService.listCalculatorScenarios(),
@@ -1528,6 +1570,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
         ]);
         setSavedCalculatorScenarios(scenarios);
         setWorkspaceSnapshots(snapshots);
+        pendingOfflineSyncRef.current = false;
         return result;
       },
       { minVisualMs: 220 },
@@ -1551,10 +1594,16 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     personaTrack,
     currency,
     bookmarkedDocIds,
+    buildInvestorBriefingCacheInput,
   ]);
+
+  useEffect(() => {
+    forceSyncRef.current = forceSync;
+  }, [forceSync]);
 
   const clearLocalCachedData = useCallback(async (): Promise<void> => {
     clearGuardUntilRef.current = Date.now() + 600;
+    pendingOfflineSyncRef.current = false;
     await runTrackedPersistence(async () => {
       await persistenceService.clearAll();
       try {
@@ -1577,6 +1626,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     setContactInquiries([]);
     setSavedProposals([]);
     setBookmarkedDocIds([]);
+    setInvestorBriefingCachedAt(null);
     setSelectedIds(DEFAULT_SELECTED_IDS);
     setDeploymentTargetState('on-prem');
     setHitlConfidence(0.91);
@@ -1598,21 +1648,33 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    setAutoNotice('Exported complete IndexedDB offline backup JSON');
+    const scenCount = bundle.scenarios?.length ?? 0;
+    const snapCount = bundle.workspaceSnapshots?.length ?? 0;
+    setAutoNotice(
+      `Exported ${scenCount} scenario${scenCount === 1 ? '' : 's'} & ${snapCount} workspace snapshot${snapCount === 1 ? '' : 's'} JSON`,
+    );
   }, [persistenceService]);
 
-  // Track browser online/offline connectivity and automatically reconcile when connection returns
+  // Track browser online/offline connectivity and automatically sync/reconcile on reconnect
   useEffect(() => {
     const handleOnline = () => {
       persistenceService.setOnlineStatus(true);
       setIsOnline(true);
       if (investorCalculatorHydrated) {
-        void runTrackedPersistence(() => persistenceService.reconcileAndVerify());
+        const hadPendingOffline = pendingOfflineSyncRef.current;
+        void (forceSyncRef.current ? forceSyncRef.current() : runTrackedPersistence(() => persistenceService.reconcileAndVerify())).then(
+          () => {
+            if (hadPendingOffline) {
+              setAutoNotice('Connection restored — synced offline Investor Briefing cache & IndexedDB stores');
+            }
+          },
+        );
       }
     };
     const handleOffline = () => {
       persistenceService.setOnlineStatus(false);
       setIsOnline(false);
+      pendingOfflineSyncRef.current = true;
     };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -1636,6 +1698,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
       persistenceService.loadDiligencePrefs(),
       persistenceService.listInvestorFeedback(),
       persistenceService.listContactInquiries(),
+      persistenceService.loadInvestorBriefingCache(),
     ]).then(
       ([
         savedCalc,
@@ -1646,6 +1709,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
         diligencePrefs,
         feedbackList,
         inquiryList,
+        briefingCache,
       ]) => {
         if (!active) return;
         const restoredCalc = savedCalc ?? latestSnapshot?.calculatorState ?? null;
@@ -1658,8 +1722,8 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
         if (Array.isArray(snapshots)) {
           setWorkspaceSnapshots(snapshots);
         }
+        const urlQuery = isInvestorBriefingPathname() ? parseSsotBriefingQuery() : {};
         if (diligencePrefs) {
-          const urlQuery = isInvestorBriefingPathname() ? parseSsotBriefingQuery() : {};
           if (!urlQuery.currency && (diligencePrefs.currency === 'USD' || diligencePrefs.currency === 'BDT')) {
             setCurrency(diligencePrefs.currency);
           }
@@ -1673,6 +1737,30 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
           }
           if (Array.isArray(diligencePrefs.bookmarkedDocIds)) {
             setBookmarkedDocIds(diligencePrefs.bookmarkedDocIds);
+          }
+        } else if (briefingCache) {
+          if (!urlQuery.currency && (briefingCache.currency === 'USD' || briefingCache.currency === 'BDT')) {
+            setCurrency(briefingCache.currency);
+          }
+          if (
+            !urlQuery.persona &&
+            (briefingCache.personaTrack === 'financial' ||
+              briefingCache.personaTrack === 'technical' ||
+              briefingCache.personaTrack === 'strategic')
+          ) {
+            setPersonaTrack(briefingCache.personaTrack);
+          }
+          if (Array.isArray(briefingCache.bookmarkedDocIds)) {
+            setBookmarkedDocIds(briefingCache.bookmarkedDocIds);
+          }
+        }
+        if (briefingCache) {
+          setInvestorBriefingCachedAt(briefingCache.cachedAt);
+          if (!urlQuery.section && briefingCache.activeSection && isInvestorBriefingPathname()) {
+            setSsotQueryState((prev) => ({
+              ...prev,
+              section: prev.section ?? briefingCache.activeSection,
+            }));
           }
         }
         if (Array.isArray(feedbackList)) {
@@ -1719,7 +1807,13 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
             }));
           }
         }
-        setLastSyncedAt(latestSnapshot?.updatedAt ?? savedCalc?.updatedAt ?? session?.updatedAt ?? null);
+        setLastSyncedAt(
+          latestSnapshot?.updatedAt ??
+            savedCalc?.updatedAt ??
+            briefingCache?.cachedAt ??
+            session?.updatedAt ??
+            null,
+        );
         setStorageRevision((rev) => rev + 1);
         setInvestorCalculatorHydrated(true);
       },
@@ -1734,6 +1828,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!investorCalculatorHydrated) return;
     if (Date.now() < clearGuardUntilRef.current) return;
+    if (!isOnline) pendingOfflineSyncRef.current = true;
     const timer = window.setTimeout(() => {
       if (Date.now() < clearGuardUntilRef.current) return;
       void runTrackedPersistence(async () => {
@@ -1754,6 +1849,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearTimeout(timer);
   }, [
     investorCalculatorHydrated,
+    isOnline,
     investorCalculatorState,
     activeTab,
     selectedIds,
@@ -1763,26 +1859,33 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     runTrackedPersistence,
   ]);
 
-  // Automatically persist diligence preferences (currency, persona track, Data Room bookmarks) to IndexedDB
+  // Automatically persist diligence preferences (currency, persona track, Data Room bookmarks) & Investor Briefing cache to IndexedDB
   useEffect(() => {
     if (!investorCalculatorHydrated) return;
     if (Date.now() < clearGuardUntilRef.current) return;
+    if (!isOnline) pendingOfflineSyncRef.current = true;
     const timer = window.setTimeout(() => {
       if (Date.now() < clearGuardUntilRef.current) return;
-      void runTrackedPersistence(() =>
-        persistenceService.saveDiligencePrefs({
-          personaTrack,
-          currency,
-          bookmarkedDocIds,
-        }),
-      );
+      void runTrackedPersistence(async () => {
+        const [, cachedBriefing] = await Promise.all([
+          persistenceService.saveDiligencePrefs({
+            personaTrack,
+            currency,
+            bookmarkedDocIds,
+          }),
+          persistenceService.saveInvestorBriefingCache(buildInvestorBriefingCacheInput()),
+        ]);
+        setInvestorBriefingCachedAt(cachedBriefing.cachedAt);
+      });
     }, 150);
     return () => window.clearTimeout(timer);
   }, [
     investorCalculatorHydrated,
+    isOnline,
     personaTrack,
     currency,
     bookmarkedDocIds,
+    buildInvestorBriefingCacheInput,
     persistenceService,
     runTrackedPersistence,
   ]);
@@ -2674,6 +2777,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
         getStorageMetrics,
         clearLocalCachedData,
         exportOfflineBackup,
+        investorBriefingCachedAt,
       }}
     >
       {children}

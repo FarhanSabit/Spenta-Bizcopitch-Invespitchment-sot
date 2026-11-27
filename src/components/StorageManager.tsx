@@ -9,6 +9,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   Trash2,
   WifiOff,
   X,
@@ -21,39 +22,47 @@ import {
 
 const STORE_METADATA: Record<
   PersistenceStoreName,
-  { label: string; description: string }
+  { label: string; description: string; swatchClass: string }
 > = {
   investorCalculator: {
     label: 'Active Investor Calculator',
     description: 'Current ROI, FX, dilution, and revenue-mix model parameters',
+    swatchClass: 'bg-[#1F3863] dark:bg-[#8FA6E8]',
   },
   calculatorScenarios: {
     label: 'Saved Calculator Scenarios',
     description: 'User-named financial modeling presets stored offline',
+    swatchClass: 'bg-[#0891B2] dark:bg-[#22D3EE]',
   },
   workspaceSnapshots: {
     label: 'Workspace Snapshots',
     description: 'Auto-saved session checkpoint plus named stack snapshots',
+    swatchClass: 'bg-[#1C6E46] dark:bg-[#6FCB9F]',
   },
   chartProjections: {
-    label: 'Cached Chart Projections',
-    description: 'Pre-computed 5-year P&L and MOIC series for offline charts',
+    label: 'Cached Projections & Briefing',
+    description: 'Offline Investor Briefing SSOT cache and 5-year P&L / MOIC series',
+    swatchClass: 'bg-[#B45309] dark:bg-[#F59E0B]',
   },
   userSession: {
     label: 'Active User Session',
     description: 'Last active portal tab, stack selection, and deployment target',
+    swatchClass: 'bg-[#4F46E5] dark:bg-[#A5B4FC]',
   },
   diligencePrefs: {
     label: 'Diligence Preferences',
     description: 'Investor persona track, currency mode, and Data Room bookmarks',
+    swatchClass: 'bg-[#0D9488] dark:bg-[#5EEAD4]',
   },
   investorFeedback: {
     label: 'Investor Feedback & Notes',
     description: 'Section-level diligence notes, replies, and sentiment ratings',
+    swatchClass: 'bg-[#E11D48] dark:bg-[#FB7185]',
   },
   contactInquiries: {
     label: 'Offline Founder Inquiries',
     description: 'Drafted SAFE term-sheet and founder outreach inquiries',
+    swatchClass: 'bg-[#7C3AED] dark:bg-[#C4B5FD]',
   },
 };
 
@@ -120,6 +129,7 @@ export function StorageManager() {
   const [confirmClearOpen, setConfirmClearOpen] = useState<boolean>(false);
   const [clearing, setClearing] = useState<boolean>(false);
   const [scenarioNameInput, setScenarioNameInput] = useState<string>('');
+  const [scenarioSearchQuery, setScenarioSearchQuery] = useState<string>('');
   const [snapshotNameInput, setSnapshotNameInput] = useState<string>('');
 
   const refreshMetrics = useCallback(async () => {
@@ -189,6 +199,29 @@ export function StorageManager() {
     return metrics.scenarioEntries + metrics.workspaceEntries;
   }, [metrics]);
 
+  const storageBreakdown = useMemo(() => {
+    const stats = metrics?.storeStats ?? [];
+    const totalBytes = metrics?.estimatedPayloadBytes ?? 0;
+    return [...stats]
+      .sort((a, b) => b.bytes - a.bytes || b.count - a.count)
+      .map((row) => ({
+        ...row,
+        meta: STORE_METADATA[row.store],
+        sharePct: totalBytes > 0 ? (row.bytes / totalBytes) * 100 : 0,
+      }));
+  }, [metrics]);
+
+  const filteredScenarios = useMemo(() => {
+    const q = scenarioSearchQuery.trim().toLowerCase();
+    if (!q) return savedCalculatorScenarios;
+    return savedCalculatorScenarios.filter(
+      (item) =>
+        item.name.toLowerCase().includes(q) ||
+        (item.description && item.description.toLowerCase().includes(q)) ||
+        item.state.scenario.toLowerCase().includes(q),
+    );
+  }, [savedCalculatorScenarios, scenarioSearchQuery]);
+
   return (
     <section
       aria-label="Local IndexedDB Storage Manager"
@@ -246,11 +279,12 @@ export function StorageManager() {
 
             <button
               type="button"
+              data-testid="storage-export-data-btn"
               onClick={() => void exportOfflineBackup()}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1C6E46] dark:hover:border-[#6FCB9F] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" strokeWidth={1.6} />
-              <span>Export Backup</span>
+              <span>Export Data</span>
             </button>
 
             <button
@@ -439,6 +473,71 @@ export function StorageManager() {
         </div>
       </div>
 
+      {/* Storage Breakdown by Item Type (Sorted Largest Consumer First) */}
+      <div
+        data-testid="storage-breakdown-by-type"
+        className="rounded-2xl border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] p-5"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#E4DFD6] dark:border-[#232B4A]">
+          <div>
+            <h3 className="text-sm font-bold text-[#16213A] dark:text-[#E7EBF5]">
+              Storage Breakdown by Type
+            </h3>
+            <p className="text-xs text-[#5F6576] dark:text-[#8E96B0] mt-0.5">
+              Ranked by serialized byte consumption across scenarios, workspace snapshots, briefing caches, and diligence notes.
+            </p>
+          </div>
+          <span className="text-xs font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0]">
+            {formatBytes(metrics?.estimatedPayloadBytes ?? 0)} allocated
+          </span>
+        </div>
+
+        {/* Multi-segment proportional bar */}
+        <div
+          aria-label="Proportional storage usage bar"
+          className="mt-4 h-3 w-full rounded-md bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A] overflow-hidden flex gap-0.5 p-0.5"
+        >
+          {storageBreakdown
+            .filter((item) => item.bytes > 0)
+            .map((item) => (
+              <div
+                key={item.store}
+                className={`h-full rounded-xs ${item.meta.swatchClass} transition-all`}
+                style={{ width: `${Math.max(item.sharePct, 2)}%` }}
+                title={`${item.meta.label}: ${formatBytes(item.bytes)} (${item.sharePct.toFixed(1)}%)`}
+              />
+            ))}
+        </div>
+
+        {/* Ranked Type Rows */}
+        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5">
+          {storageBreakdown.map((item) => (
+            <div key={item.store} className="space-y-1">
+              <div className="flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={`w-2 h-2 rounded-xs shrink-0 ${item.meta.swatchClass}`} />
+                  <span className="font-medium text-[#16213A] dark:text-[#E7EBF5] truncate">
+                    {item.meta.label}
+                  </span>
+                  <span className="text-[11px] font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0] shrink-0">
+                    ({item.count})
+                  </span>
+                </div>
+                <span className="font-mono tabular-nums text-[11px] text-[#5F6576] dark:text-[#8E96B0] shrink-0">
+                  {formatBytes(item.bytes)} · {item.sharePct.toFixed(1)}%
+                </span>
+              </div>
+              <div className="h-1.5 w-full rounded-sm bg-[#FAF8F4] dark:bg-[#0F1529] overflow-hidden">
+                <div
+                  className={`h-full rounded-sm ${item.meta.swatchClass} transition-all`}
+                  style={{ width: `${item.bytes > 0 ? Math.max(item.sharePct, 2) : 0}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Store-by-Store IndexedDB Breakdown Table */}
       <div className="rounded-2xl border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] overflow-hidden">
         <div className="px-5 py-4 border-b border-[#E4DFD6] dark:border-[#232B4A] flex flex-wrap items-center justify-between gap-2">
@@ -536,13 +635,53 @@ export function StorageManager() {
             </button>
           </form>
 
+          {/* Search Saved Scenarios by Name */}
+          <div className="mt-2.5 relative">
+            <Search
+              className="w-3.5 h-3.5 text-[#5F6576] dark:text-[#8E96B0] absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+              strokeWidth={1.6}
+            />
+            <input
+              type="search"
+              data-testid="scenario-search-input"
+              value={scenarioSearchQuery}
+              onChange={(e) => setScenarioSearchQuery(e.target.value)}
+              placeholder="Search saved scenarios by name…"
+              aria-label="Search saved scenarios by name"
+              className="w-full h-9 pl-8 pr-8 text-xs rounded-lg bg-[#FAF8F4] dark:bg-[#0B1020] border border-[#E4DFD6] dark:border-[#232B4A] text-[#16213A] dark:text-[#E7EBF5] placeholder:text-[#7D8599] focus:outline-none focus:border-[#1F3863] dark:focus:border-[#8FA6E8]"
+            />
+            {scenarioSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setScenarioSearchQuery('')}
+                aria-label="Clear scenario search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#5F6576] hover:text-[#16213A] dark:hover:text-[#E7EBF5] cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" strokeWidth={1.6} />
+              </button>
+            )}
+          </div>
+
           <div className="mt-3 divide-y divide-[#E4DFD6] dark:divide-[#232B4A] flex-1">
             {savedCalculatorScenarios.length === 0 ? (
               <div className="py-8 text-center text-xs text-[#5F6576] dark:text-[#8E96B0]">
                 No named investor scenarios saved yet. Save your active calculator parameters above to benchmark cases offline.
               </div>
+            ) : filteredScenarios.length === 0 ? (
+              <div className="py-8 text-center space-y-2">
+                <div className="text-xs text-[#5F6576] dark:text-[#8E96B0]">
+                  No saved scenarios matching &ldquo;{scenarioSearchQuery.trim()}&rdquo;.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setScenarioSearchQuery('')}
+                  className="text-xs font-semibold text-[#1F3863] dark:text-[#8FA6E8] hover:underline cursor-pointer"
+                >
+                  Clear search
+                </button>
+              </div>
             ) : (
-              savedCalculatorScenarios.map((item) => (
+              filteredScenarios.map((item) => (
                 <div
                   key={item.id}
                   className="py-3 flex items-center justify-between gap-3"

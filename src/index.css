@@ -926,12 +926,16 @@ input[type="range"].spenta-slider::-moz-range-thumb {
   --ssot-accent: #1f3863;
   --ssot-cyan: #0891b2;
   --ssot-emerald: #1c6e46;
+  --ssot-surface: #f8fafc;
+  --ssot-surface-elevated: #f1f5f9;
 }
 
 .dark .spenta-ssot-scope {
   --ssot-accent: #8fa6e8;
   --ssot-cyan: #22d3ee;
   --ssot-emerald: #6fcb9f;
+  --ssot-surface: #05070b;
+  --ssot-surface-elevated: #070a10;
 }
 
 .spenta-ssot-scope .font-display-ssot {
@@ -1019,22 +1023,32 @@ input[type="range"].spenta-slider::-moz-range-thumb {
 }
 
 .spenta-ssot-scope .high-density-box {
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(248, 250, 252, 0.94);
   border: 1px solid #e4dfd6;
 }
 
 .dark .spenta-ssot-scope .high-density-box {
-  background: rgba(20, 26, 50, 0.88);
+  background: rgba(7, 10, 16, 0.92);
   border: 1px solid #232b4a;
 }
 
 .spenta-ssot-scope .service-card-3d {
-  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.24s cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-style: preserve-3d;
 }
 
 .spenta-ssot-scope .service-card-3d:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 24px -14px rgba(15, 23, 42, 0.25);
+  transform: translateY(-2px) rotateX(1deg);
+  box-shadow: 0 12px 28px -14px rgba(15, 23, 42, 0.25);
+}
+
+.dark .spenta-ssot-scope .service-card-3d:hover {
+  box-shadow:
+    0 14px 32px -14px rgba(0, 0, 0, 0.65),
+    0 0 0 1px rgba(34, 211, 238, 0.22);
 }
 
 .spenta-ssot-scope .crt-scanlines {
@@ -1121,19 +1135,19 @@ input[type="range"].spenta-slider::-moz-range-thumb {
 }
 
 .spenta-ssot-scope .animate-value-pulse {
-  animation: ssot-value-pulse 2.4s ease-in-out infinite;
+  animation: ssot-value-pulse 2.4s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
 .spenta-ssot-scope .animate-divider-sweep {
-  animation: ssot-divider-sweep 3.2s ease-in-out infinite;
+  animation: ssot-divider-sweep 3.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
 .spenta-ssot-scope .animate-divider-pulse {
-  animation: ssot-value-pulse 2.8s ease-in-out infinite;
+  animation: ssot-value-pulse 2.8s cubic-bezier(0.16, 1, 0.3, 1) infinite;
 }
 
 .spenta-ssot-scope .animate-section-header-pulse {
-  animation: ssot-section-header-pulse 1.35s ease-out 1;
+  animation: ssot-section-header-pulse 1.35s cubic-bezier(0.16, 1, 0.3, 1) 1;
 }
 
 /* Right-rail safe gutter padding between 768px and 1460px */

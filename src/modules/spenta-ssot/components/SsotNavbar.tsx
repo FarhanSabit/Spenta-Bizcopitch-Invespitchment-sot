@@ -17,6 +17,7 @@ import {
 import { useTheme } from '../../../context/ThemeContext';
 import { useStack } from '../../../store/StackContext';
 import { SpentaLogo } from '../../../components/SpentaLogo';
+import { SyncStatusIndicator } from '../../../components/SyncStatusIndicator';
 import { useSsotBriefing } from '../context/SsotBriefingContext';
 import { getPanelPreloadHandlers } from '../../../utils/viewPreloaders';
 
@@ -115,8 +116,12 @@ export function SsotNavbar() {
           })}
         </nav>
 
-        {/* Right: Currency, Tools Overflow Menu (1024px-1679px), Full Tool Strip (1680px+), Theme */}
+        {/* Right: SyncStatusIndicator, Currency, Tools Overflow Menu (1024px-1679px), Full Tool Strip (1680px+), Theme */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <div className="hidden md:flex items-center">
+            <SyncStatusIndicator />
+          </div>
+
           {/* Currency Switcher */}
           <div
             role="group"
@@ -324,6 +329,8 @@ export function SsotNavbar() {
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>← Back to Spentech Pitching WebApp</span>
           </button>
+
+          <SyncStatusIndicator compact />
 
           <div className="grid grid-cols-2 gap-1.5">
             {QUICK_SECTION_LINKS.map((item) => (

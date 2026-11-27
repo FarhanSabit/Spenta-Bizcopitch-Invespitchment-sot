@@ -283,4 +283,69 @@ describe('LocalPersistenceService (offline-first storage v3)', () => {
     unsubscribe();
     await svc.clearAll();
   });
+
+  it('caches investor briefing data offline and exports top-level scenarios & workspaceSnapshots arrays', async () => {
+    const svc = new LocalPersistenceService('spenta_briefing_cache_test_db', 3);
+
+    const calcState = {
+      scenario: 'upside' as const,
+      growthMode: 'aggressive' as const,
+      fxRate: 122.61,
+      taxRate: 25,
+      exitMultiple: 12,
+      dilutionPct: 10,
+      investmentK: 500,
+      horizonYears: 5,
+      compareGrowthScenarios: true,
+      projectedChartMetric: 'moic' as const,
+      subTab: 'roi' as const,
+      mixPreset: 'fy31' as const,
+      mixScopeWeights: { one_time_builds: 24, recurring_saas: 44 },
+      mixOpexRatioPct: 24,
+    };
+
+    const scenario = await svc.saveScenario({
+      name: 'Alpha Sovereign Scenario',
+      state: calcState,
+    });
+    const snapshot = await svc.saveWorkspaceSnapshot({
+      name: 'Briefing Snapshot Alpha',
+      activeTab: 'App Vault',
+      selectedIds: ['icr_ops'],
+      deploymentTarget: 'on-prem',
+      hitlConfidence: 0.92,
+      calculatorState: calcState,
+    });
+
+    const cached = await svc.saveInvestorBriefingCache({
+      chaptersCount: 9,
+      tiersCount: 9,
+      caseStudiesCount: 4,
+      dataRoomDocsCount: 8,
+      safeTermsSnapshot: { raiseUsd: 500000, postMoneyCapUsd: 4500000 },
+      activeSection: 'ssot-unit-economics',
+      personaTrack: 'financial',
+      currency: 'BDT',
+      scenario: 'upside',
+      bookmarkedDocIds: ['dr-safe-memo', 'dr-safe-memo', 'dr-5yr-pnl'],
+      feedbackCount: 2,
+      payload: { offlineReady: true },
+    });
+
+    assert.equal(cached.chaptersCount, 9);
+    assert.deepEqual(cached.bookmarkedDocIds, ['dr-safe-memo', 'dr-5yr-pnl']);
+
+    const loaded = await svc.loadInvestorBriefingCache();
+    assert.equal(loaded?.activeSection, 'ssot-unit-economics');
+    assert.equal(loaded?.currency, 'BDT');
+    assert.equal(loaded?.tiersCount, 9);
+
+    const bundle = await svc.exportAllOfflineData();
+    assert.equal(bundle.scenarios?.length, 1);
+    assert.equal(bundle.scenarios?.[0].id, scenario.id);
+    assert.equal(bundle.workspaceSnapshots?.length, 1);
+    assert.equal(bundle.workspaceSnapshots?.[0].id, snapshot.id);
+
+    await svc.clearAll();
+  });
 });

@@ -27,6 +27,7 @@ export const DEFAULT_CALCULATOR_KEY = 'active_investor_calculator';
 export const DEFAULT_SESSION_KEY = 'active_user_session';
 export const DEFAULT_DILIGENCE_PREFS_KEY = 'active_diligence_prefs';
 export const DEFAULT_WORKSPACE_SNAPSHOT_KEY = 'latest_workspace_snapshot';
+export const DEFAULT_INVESTOR_BRIEFING_CACHE_KEY = 'investor_briefing_ssot_v1';
 
 export interface PersistedInvestorCalculatorState {
   scenario: 'conservative' | 'upside';
@@ -124,9 +125,28 @@ export interface OfflineContactInquiry {
   createdAt: string;
 }
 
+export interface InvestorBriefingCacheRecord {
+  id: string;
+  cachedAt: string;
+  chaptersCount: number;
+  tiersCount: number;
+  caseStudiesCount: number;
+  dataRoomDocsCount: number;
+  safeTermsSnapshot: Record<string, unknown>;
+  activeSection: string;
+  personaTrack: 'financial' | 'technical' | 'strategic';
+  currency: 'USD' | 'BDT';
+  scenario: 'conservative' | 'upside';
+  bookmarkedDocIds: string[];
+  feedbackCount: number;
+  payload: Record<string, unknown>;
+}
+
 export interface OfflinePersistenceBundle {
   schemaVersion: number;
   exportedAt: string;
+  scenarios?: InvestorCalculatorScenario[];
+  workspaceSnapshots?: UserWorkspaceSnapshot[];
   stores: Record<PersistenceStoreName, Record<string, unknown>>;
 }
 
@@ -590,6 +610,27 @@ export class LocalPersistenceService {
     return Object.values(all);
   }
 
+  // Investor Briefing Offline Cache (stored in chartProjections store under fixed key)
+  async saveInvestorBriefingCache(
+    record: Omit<InvestorBriefingCacheRecord, 'id' | 'cachedAt'> & { cachedAt?: string },
+  ): Promise<InvestorBriefingCacheRecord> {
+    const payload: InvestorBriefingCacheRecord = {
+      ...record,
+      id: DEFAULT_INVESTOR_BRIEFING_CACHE_KEY,
+      cachedAt: record.cachedAt ?? new Date().toISOString(),
+      bookmarkedDocIds: Array.from(new Set(record.bookmarkedDocIds)),
+    };
+    await this.setRecord('chartProjections', DEFAULT_INVESTOR_BRIEFING_CACHE_KEY, payload);
+    return payload;
+  }
+
+  async loadInvestorBriefingCache(): Promise<InvestorBriefingCacheRecord | null> {
+    return this.getRecord<InvestorBriefingCacheRecord>(
+      'chartProjections',
+      DEFAULT_INVESTOR_BRIEFING_CACHE_KEY,
+    );
+  }
+
   // Active User Session
   async saveUserSession(
     session: Omit<PersistedUserSessionData, 'updatedAt'> & { updatedAt?: string },
@@ -764,9 +805,18 @@ export class LocalPersistenceService {
       this.getAllRecords('contactInquiries'),
     ]);
 
+    const scenarios = Object.values(
+      calculatorScenarios as Record<string, InvestorCalculatorScenario>,
+    ).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const snapshots = Object.values(
+      workspaceSnapshots as Record<string, UserWorkspaceSnapshot>,
+    ).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
     return {
       schemaVersion: this.dbVersion,
       exportedAt: new Date().toISOString(),
+      scenarios,
+      workspaceSnapshots: snapshots,
       stores: {
         investorCalculator,
         calculatorScenarios,
