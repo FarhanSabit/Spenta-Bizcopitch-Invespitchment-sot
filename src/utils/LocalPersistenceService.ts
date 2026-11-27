@@ -47,11 +47,13 @@ export interface PersistedInvestorCalculatorState {
   updatedAt: string;
 }
 
+export type InvestorCalculatorState = Omit<PersistedInvestorCalculatorState, 'updatedAt'>;
+
 export interface InvestorCalculatorScenario {
   id: string;
   name: string;
   description?: string;
-  state: Omit<PersistedInvestorCalculatorState, 'updatedAt'>;
+  state: InvestorCalculatorState;
   createdAt: string;
   updatedAt: string;
 }
@@ -111,6 +113,7 @@ export interface DiligencePreferencesRecord {
   personaTrack: 'financial' | 'technical' | 'strategic';
   currency: 'USD' | 'BDT';
   bookmarkedDocIds: string[];
+  autoCleanupSnapshots30d?: boolean;
   updatedAt: string;
 }
 
@@ -179,12 +182,43 @@ export interface PersistenceReconciliationResult {
   reconciledAt: string;
 }
 
+export interface SnapshotCleanupResult {
+  purgedCount: number;
+  purgedIds: string[];
+  purgedNames: string[];
+  cutoffIso: string;
+  freedBytesEstimate: number;
+}
+
+export interface OfflineExportSummary {
+  filename: string;
+  schemaVersion: number;
+  exportedAt: string;
+  scenariosCount: number;
+  snapshotsCount: number;
+  storeNames: PersistenceStoreName[];
+  totalRecords: number;
+  byteSize: number;
+}
+
+export interface PersistenceAuditEvent {
+  id: string;
+  timestamp: string;
+  title: string;
+  detail: string;
+  status: PersistenceSyncStatus;
+  category: 'scenario' | 'snapshot' | 'cleanup' | 'sync' | 'export' | 'system';
+  metadata?: Record<string, unknown>;
+}
+
 export type PersistenceSyncStatus = 'synced' | 'syncing' | 'offline';
 
 export interface PersistenceSyncState {
   status: PersistenceSyncStatus;
   isOnline: boolean;
   activeOperations: number;
+  pendingUnsyncedCount: number;
+  pendingUnsyncedStores: PersistenceStoreName[];
   lastSyncedAt: string | null;
   revision: number;
   backend: 'indexeddb' | 'fallback';
@@ -257,10 +291,185 @@ export class LocalPersistenceService {
     diligencePrefs: new Map(),
     contactInquiries: new Map(),
   };
+  private readonly pendingUnsyncedChanges = new Map<
+    string,
+    { store: PersistenceStoreName; key: string; updatedAt: string }
+  >();
+  private readonly auditListeners = new Set<(events: PersistenceAuditEvent[]) => void>();
+  private memoryAuditLog: PersistenceAuditEvent[] = [];
 
   constructor(dbName = PERSISTENCE_DB_NAME, dbVersion = PERSISTENCE_DB_VERSION) {
     this.dbName = dbName;
     this.dbVersion = dbVersion;
+    this.hydratePendingUnsyncedChanges();
+    this.hydrateAuditLog();
+  }
+
+  private pendingChangesStorageKey(): string {
+    return `spenta_pending_unsynced_v1:${this.dbName}`;
+  }
+
+  private hydratePendingUnsyncedChanges(): void {
+    const ls = getLocalStorageSafe();
+    if (!ls) return;
+    try {
+      const raw = ls.getItem(this.pendingChangesStorageKey());
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Array<{
+        id: string;
+        store: PersistenceStoreName;
+        key: string;
+        updatedAt: string;
+      }>;
+      if (!Array.isArray(parsed)) return;
+      for (const entry of parsed) {
+        if (entry && typeof entry.id === 'string' && typeof entry.store === 'string') {
+          this.pendingUnsyncedChanges.set(entry.id, {
+            store: entry.store,
+            key: entry.key,
+            updatedAt: entry.updatedAt,
+          });
+        }
+      }
+    } catch {
+      // ignore corrupted pending queue cache
+    }
+  }
+
+  private persistPendingUnsyncedChanges(): void {
+    const ls = getLocalStorageSafe();
+    if (!ls) return;
+    try {
+      if (this.pendingUnsyncedChanges.size === 0) {
+        ls.removeItem(this.pendingChangesStorageKey());
+        return;
+      }
+      const serialized = Array.from(this.pendingUnsyncedChanges.entries()).map(([id, item]) => ({
+        id,
+        ...item,
+      }));
+      ls.setItem(this.pendingChangesStorageKey(), JSON.stringify(serialized));
+    } catch {
+      // ignore storage quota errors
+    }
+  }
+
+  private markPendingUnsyncedChange(store: PersistenceStoreName, key: string): void {
+    if (this.isOnlineState) return;
+    this.pendingUnsyncedChanges.set(`${store}:${key}`, {
+      store,
+      key,
+      updatedAt: new Date().toISOString(),
+    });
+    this.persistPendingUnsyncedChanges();
+  }
+
+  private clearPendingUnsyncedChanges(): void {
+    if (this.pendingUnsyncedChanges.size === 0) return;
+    this.pendingUnsyncedChanges.clear();
+    this.persistPendingUnsyncedChanges();
+  }
+
+  private auditLogStorageKey(): string {
+    return `spenta_sync_audit_log_v2:${this.dbName}`;
+  }
+
+  private hydrateAuditLog(): void {
+    const ls = getLocalStorageSafe();
+    if (ls) {
+      try {
+        const raw = ls.getItem(this.auditLogStorageKey());
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            this.memoryAuditLog = parsed as PersistenceAuditEvent[];
+            return;
+          }
+        }
+      } catch {
+        // ignore storage parse error
+      }
+    }
+
+    // Default seed event if empty
+    this.memoryAuditLog = [
+      {
+        id: createRecordId('audit_init'),
+        timestamp: new Date().toISOString(),
+        title: this.isOnlineState ? 'Sync monitor online' : 'Sync monitor offline',
+        detail: `Connected to ${this.getStorageBackend()} at revision #${this.revision}.`,
+        status: this.isOnlineState ? 'synced' : 'offline',
+        category: 'system',
+      },
+    ];
+  }
+
+  private persistAuditLog(): void {
+    const ls = getLocalStorageSafe();
+    if (!ls) return;
+    try {
+      ls.setItem(this.auditLogStorageKey(), JSON.stringify(this.memoryAuditLog.slice(0, 100)));
+    } catch {
+      // ignore storage quota error
+    }
+  }
+
+  recordAuditEvent(
+    event: Omit<PersistenceAuditEvent, 'id' | 'timestamp'> & { id?: string; timestamp?: string },
+  ): PersistenceAuditEvent {
+    const record: PersistenceAuditEvent = {
+      id: event.id ?? createRecordId('audit_evt'),
+      timestamp: event.timestamp ?? new Date().toISOString(),
+      title: event.title,
+      detail: event.detail,
+      status: event.status,
+      category: event.category,
+      metadata: event.metadata,
+    };
+
+    this.memoryAuditLog = [record, ...this.memoryAuditLog].slice(0, 100);
+    this.persistAuditLog();
+
+    for (const listener of this.auditListeners) {
+      try {
+        listener(this.getAuditLog());
+      } catch {
+        // ignore listener errors
+      }
+    }
+
+    return record;
+  }
+
+  getAuditLog(): PersistenceAuditEvent[] {
+    return [...this.memoryAuditLog];
+  }
+
+  clearAuditLog(): void {
+    this.memoryAuditLog = [];
+    const ls = getLocalStorageSafe();
+    if (ls) {
+      try {
+        ls.removeItem(this.auditLogStorageKey());
+      } catch {
+        // ignore
+      }
+    }
+    for (const listener of this.auditListeners) {
+      try {
+        listener([]);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  subscribeAuditLog(listener: (events: PersistenceAuditEvent[]) => void): () => void {
+    this.auditListeners.add(listener);
+    listener(this.getAuditLog());
+    return () => {
+      this.auditListeners.delete(listener);
+    };
   }
 
   getSyncState(): PersistenceSyncState {
@@ -269,10 +478,15 @@ export class LocalPersistenceService {
       : this.activeOperations > 0
         ? 'syncing'
         : 'synced';
+    const pendingUnsyncedStores = Array.from(
+      new Set(Array.from(this.pendingUnsyncedChanges.values()).map((entry) => entry.store)),
+    );
     return {
       status,
       isOnline: this.isOnlineState,
       activeOperations: this.activeOperations,
+      pendingUnsyncedCount: this.pendingUnsyncedChanges.size,
+      pendingUnsyncedStores,
       lastSyncedAt: this.lastSyncedAt,
       revision: this.revision,
       backend: this.getStorageBackend(),
@@ -301,6 +515,14 @@ export class LocalPersistenceService {
   setOnlineStatus(online: boolean): void {
     if (this.isOnlineState === online) return;
     this.isOnlineState = online;
+    this.recordAuditEvent({
+      title: online ? 'Connection restored — Online' : 'Network offline — writes queued locally',
+      detail: online
+        ? `Network connection restored (${this.getStorageBackend()}). Ready for synchronization.`
+        : 'Browser went offline. Scenario and snapshot mutations will be safely queued in IndexedDB.',
+      status: online ? 'synced' : 'offline',
+      category: 'sync',
+    });
     this.emitSyncState();
   }
 
@@ -447,6 +669,9 @@ export class LocalPersistenceService {
         mutated = true;
       }
     } finally {
+      if (mutated && !this.isOnlineState) {
+        this.markPendingUnsyncedChange(store, key);
+      }
       this.endSyncOperation(mutated);
     }
   }
@@ -516,6 +741,9 @@ export class LocalPersistenceService {
         // ignore IndexedDB delete error; fallback already cleared
       }
     } finally {
+      if (mutated && !this.isOnlineState) {
+        this.markPendingUnsyncedChange(store, key);
+      }
       this.endSyncOperation(mutated);
     }
   }
@@ -555,6 +783,13 @@ export class LocalPersistenceService {
       updatedAt: now,
     };
     await this.setRecord('calculatorScenarios', record.id, record);
+    this.recordAuditEvent({
+      title: 'Scenario saved',
+      detail: `Scenario "${record.name}" saved to IndexedDB (${this.estimateSerializedBytes(record)} bytes).`,
+      status: 'synced',
+      category: 'scenario',
+      metadata: { scenarioId: record.id, name: record.name },
+    });
     return record;
   }
 
@@ -582,6 +817,13 @@ export class LocalPersistenceService {
 
   async deleteCalculatorScenario(id: string): Promise<void> {
     await this.deleteRecord('calculatorScenarios', id);
+    this.recordAuditEvent({
+      title: 'Scenario deleted',
+      detail: `Scenario "${id}" removed from IndexedDB.`,
+      status: 'synced',
+      category: 'scenario',
+      metadata: { scenarioId: id },
+    });
   }
 
   // Computed Chart Projections
@@ -669,6 +911,13 @@ export class LocalPersistenceService {
       updatedAt: now,
     };
     await this.setRecord('workspaceSnapshots', record.id, record);
+    this.recordAuditEvent({
+      title: 'Workspace snapshot saved',
+      detail: `Snapshot "${record.name}" (${record.activeTab}) saved to IndexedDB (${this.estimateSerializedBytes(record)} bytes).`,
+      status: 'synced',
+      category: 'snapshot',
+      metadata: { snapshotId: record.id, name: record.name, activeTab: record.activeTab },
+    });
     return record;
   }
 
@@ -687,6 +936,81 @@ export class LocalPersistenceService {
 
   async deleteWorkspaceSnapshot(id: string): Promise<void> {
     await this.deleteRecord('workspaceSnapshots', id);
+    this.recordAuditEvent({
+      title: 'Workspace snapshot deleted',
+      detail: `Snapshot "${id}" removed from IndexedDB.`,
+      status: 'synced',
+      category: 'snapshot',
+      metadata: { snapshotId: id },
+    });
+  }
+
+  async purgeOldSnapshots(
+    maxAgeDays: number = 30,
+    nowMs: number = Date.now(),
+  ): Promise<SnapshotCleanupResult> {
+    const safeDays = Math.max(1, Math.floor(maxAgeDays));
+    const cutoffMs = nowMs - safeDays * 86_400_000;
+    const cutoffIso = new Date(cutoffMs).toISOString();
+
+    const all = await this.getAllRecords<UserWorkspaceSnapshot>('workspaceSnapshots');
+    const stale = Object.values(all).filter((snap) => {
+      if (!snap || snap.id === DEFAULT_WORKSPACE_SNAPSHOT_KEY) return false;
+      const rawTs = snap.updatedAt || snap.createdAt;
+      if (!rawTs) return false;
+      const parsedMs = Date.parse(rawTs);
+      return Number.isFinite(parsedMs) && parsedMs < cutoffMs;
+    });
+
+    if (stale.length === 0) {
+      const result: SnapshotCleanupResult = {
+        purgedCount: 0,
+        purgedIds: [],
+        purgedNames: [],
+        cutoffIso,
+        freedBytesEstimate: 0,
+      };
+      this.recordAuditEvent({
+        title: 'Auto-cleanup performed',
+        detail: `Auto-cleanup scan completed: no snapshots older than ${safeDays} days found.`,
+        status: 'synced',
+        category: 'cleanup',
+        metadata: { purgedCount: 0, freedBytes: 0 },
+      });
+      return result;
+    }
+
+    let freedBytesEstimate = 0;
+    const purgedIds: string[] = [];
+    const purgedNames: string[] = [];
+    for (const snap of stale) {
+      freedBytesEstimate += this.estimateSerializedBytes(snap);
+      await this.deleteRecord('workspaceSnapshots', snap.id);
+      purgedIds.push(snap.id);
+      purgedNames.push(snap.name);
+    }
+
+    const result: SnapshotCleanupResult = {
+      purgedCount: purgedIds.length,
+      purgedIds,
+      purgedNames,
+      cutoffIso,
+      freedBytesEstimate,
+    };
+
+    this.recordAuditEvent({
+      title: 'Auto-cleanup performed',
+      detail: `Purged ${result.purgedCount} stale snapshot(s) older than ${safeDays} days (~${result.freedBytesEstimate} bytes freed).`,
+      status: 'synced',
+      category: 'cleanup',
+      metadata: {
+        purgedCount: result.purgedCount,
+        freedBytes: result.freedBytesEstimate,
+        purgedIds,
+      },
+    });
+
+    return result;
   }
 
   // Offline Investor Section Feedback & Sentiment Analytics
@@ -884,7 +1208,16 @@ export class LocalPersistenceService {
         }),
       );
       cleared = true;
+      this.recordAuditEvent({
+        title: 'Local cache cleared',
+        detail: 'Purged all local IndexedDB stores and fallback cache.',
+        status: 'synced',
+        category: 'system',
+      });
     } finally {
+      if (cleared) {
+        this.clearPendingUnsyncedChanges();
+      }
       this.endSyncOperation(cleared);
     }
   }
@@ -1019,6 +1352,22 @@ export class LocalPersistenceService {
       }
 
       ok = verifiedStores === PERSISTENCE_STORES.length;
+      if (ok) {
+        this.recordAuditEvent({
+          title: 'Sync verified',
+          detail: `Verified ${verifiedStores} IndexedDB stores across ${totalEntries} entries.`,
+          status: 'synced',
+          category: 'sync',
+        });
+      } else {
+        this.recordAuditEvent({
+          title: 'Sync failed',
+          detail: `Reconciliation incomplete: only ${verifiedStores}/${PERSISTENCE_STORES.length} stores verified.`,
+          status: 'offline',
+          category: 'sync',
+        });
+      }
+
       return {
         ok,
         backend: db ? 'indexeddb' : 'fallback',
@@ -1026,7 +1375,18 @@ export class LocalPersistenceService {
         totalEntries,
         reconciledAt: new Date().toISOString(),
       };
+    } catch (err) {
+      this.recordAuditEvent({
+        title: 'Sync failed',
+        detail: err instanceof Error ? err.message : 'Storage reconciliation threw an unexpected error',
+        status: 'offline',
+        category: 'sync',
+      });
+      throw err;
     } finally {
+      if (ok && this.isOnlineState) {
+        this.clearPendingUnsyncedChanges();
+      }
       this.endSyncOperation(ok);
     }
   }

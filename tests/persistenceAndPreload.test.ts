@@ -348,4 +348,190 @@ describe('LocalPersistenceService (offline-first storage v3)', () => {
 
     await svc.clearAll();
   });
+
+  it('purges workspace snapshots older than 30 days while preserving recent and auto-saved checkpoints', async () => {
+    const svc = new LocalPersistenceService('spenta_cleanup_test_db', 3);
+    const calcState = {
+      scenario: 'conservative' as const,
+      growthMode: 'conservative' as const,
+      fxRate: 122.61,
+      taxRate: 22,
+      exitMultiple: 10,
+      dilutionPct: 10,
+      investmentK: 150,
+      horizonYears: 5,
+      compareGrowthScenarios: false,
+      projectedChartMetric: 'value' as const,
+      subTab: 'roi' as const,
+      mixPreset: 'fy27' as const,
+      mixScopeWeights: { one_time_builds: 50, recurring_saas: 30 },
+      mixOpexRatioPct: 28,
+    };
+
+    const recentSnap = await svc.saveWorkspaceSnapshot({
+      name: 'Recent Q4 Checkpoint',
+      activeTab: 'App Vault',
+      selectedIds: ['icr_ops'],
+      deploymentTarget: 'on-prem',
+      hitlConfidence: 0.91,
+      calculatorState: calcState,
+    });
+
+    // Save an auto-saved default checkpoint (must always be preserved regardless of age)
+    await svc.saveWorkspaceSnapshot({
+      id: 'latest_workspace_snapshot',
+      name: 'Auto-Saved Workspace',
+      activeTab: 'App Vault',
+      selectedIds: ['icr_ops'],
+      deploymentTarget: 'on-prem',
+      hitlConfidence: 0.91,
+      calculatorState: calcState,
+    });
+
+    // Simulate running cleanup 45 days in the future after saving one more snapshot at day +20
+    const futureNow = Date.now() + 45 * 86_400_000;
+    const midSnap = await svc.saveWorkspaceSnapshot({
+      name: 'Mid-Window Snapshot',
+      activeTab: 'Financials',
+      selectedIds: ['icr_ops'],
+      deploymentTarget: 'on-prem',
+      hitlConfidence: 0.91,
+      calculatorState: calcState,
+    });
+    // Backdate only midSnap? Instead pass custom nowMs such that recentSnap is 45 days old and test cutoff!
+    // At futureNow = now + 45d, both recentSnap and midSnap are 45 days old, so create a snapshot timestamped at futureNow - 5d via importAllOfflineData.
+    const bundle = await svc.exportAllOfflineData();
+    const freshSnap = {
+      ...midSnap,
+      id: 'ws_snap_fresh_5d',
+      name: 'Fresh 5-Day Snapshot',
+      createdAt: new Date(futureNow - 5 * 86_400_000).toISOString(),
+      updatedAt: new Date(futureNow - 5 * 86_400_000).toISOString(),
+    };
+    bundle.stores.workspaceSnapshots[freshSnap.id] = freshSnap;
+    await svc.importAllOfflineData(bundle);
+
+    const cleanup = await svc.purgeOldSnapshots(30, futureNow);
+    assert.equal(cleanup.purgedCount, 2);
+    assert.ok(cleanup.purgedIds.includes(recentSnap.id));
+    assert.ok(cleanup.purgedIds.includes(midSnap.id));
+    assert.ok(cleanup.freedBytesEstimate > 0);
+
+    const remaining = await svc.listWorkspaceSnapshots();
+    assert.equal(remaining.length, 1);
+    assert.equal(remaining[0].id, 'ws_snap_fresh_5d');
+
+    const autoSaved = await svc.getWorkspaceSnapshot('latest_workspace_snapshot');
+    assert.ok(autoSaved);
+
+    await svc.clearAll();
+  });
+
+  it('tracks pending unsynced IndexedDB changes while offline and clears them after online reconcile', async () => {
+    const svc = new LocalPersistenceService('spenta_pending_queue_test_db', 3);
+    assert.equal(svc.getSyncState().pendingUnsyncedCount, 0);
+
+    svc.setOnlineStatus(false);
+    await svc.saveScenario({
+      name: 'Offline Draft Scenario',
+      state: {
+        scenario: 'upside',
+        growthMode: 'aggressive',
+        fxRate: 122.61,
+        taxRate: 25,
+        exitMultiple: 12,
+        dilutionPct: 0,
+        investmentK: 500,
+        horizonYears: 5,
+        compareGrowthScenarios: false,
+        projectedChartMetric: 'value',
+        subTab: 'pnl',
+        mixPreset: 'fy31',
+        mixScopeWeights: { one_time_builds: 24, recurring_saas: 44 },
+        mixOpexRatioPct: 24,
+      },
+    });
+    await svc.saveDiligencePrefs({
+      personaTrack: 'technical',
+      currency: 'USD',
+      bookmarkedDocIds: ['dr-safe-memo'],
+    });
+
+    const offlineSyncState = svc.getSyncState();
+    assert.equal(offlineSyncState.status, 'offline');
+    assert.equal(offlineSyncState.pendingUnsyncedCount, 2);
+    assert.ok(offlineSyncState.pendingUnsyncedStores.includes('calculatorScenarios'));
+    assert.ok(offlineSyncState.pendingUnsyncedStores.includes('diligencePrefs'));
+
+    // Reconcile once connectivity returns
+    svc.setOnlineStatus(true);
+    const reconcileResult = await svc.reconcileAndVerify();
+    assert.equal(reconcileResult.ok, true);
+    assert.equal(svc.getSyncState().pendingUnsyncedCount, 0);
+    assert.deepEqual(svc.getSyncState().pendingUnsyncedStores, []);
+
+    await svc.clearAll();
+  });
+
+  it('records chronological audit events for Scenario saved, Sync failed, and Auto-cleanup performed', async () => {
+    const svc = new LocalPersistenceService('spenta_audit_log_test_db', 3);
+    svc.clearAuditLog();
+    assert.equal(svc.getAuditLog().length, 0);
+
+    // 1. Scenario saved event
+    await svc.saveScenario({
+      name: 'Seed SAFE Scenario v1',
+      state: {
+        scenario: 'conservative',
+        growthMode: 'conservative',
+        fxRate: 122.61,
+        taxRate: 25,
+        exitMultiple: 10,
+        dilutionPct: 0,
+        investmentK: 350,
+        horizonYears: 5,
+        compareGrowthScenarios: false,
+        projectedChartMetric: 'value',
+        subTab: 'pnl',
+        mixPreset: 'fy31',
+        mixScopeWeights: { one_time_builds: 30, recurring_saas: 50 },
+        mixOpexRatioPct: 20,
+      },
+    });
+
+    const afterSave = svc.getAuditLog();
+    assert.ok(afterSave.length >= 1);
+    const saveEvt = afterSave.find((e) => e.title === 'Scenario saved');
+    assert.ok(saveEvt, 'Should log a "Scenario saved" audit event');
+    assert.equal(saveEvt.category, 'scenario');
+    assert.equal(saveEvt.status, 'synced');
+    assert.ok(saveEvt.detail.includes('Seed SAFE Scenario v1'));
+
+    // 2. Auto-cleanup performed event
+    const cleanupResult = await svc.purgeOldSnapshots(30);
+    assert.equal(cleanupResult.purgedCount, 0);
+    const afterCleanup = svc.getAuditLog();
+    const cleanupEvt = afterCleanup.find((e) => e.title === 'Auto-cleanup performed');
+    assert.ok(cleanupEvt, 'Should log an "Auto-cleanup performed" audit event');
+    assert.equal(cleanupEvt.category, 'cleanup');
+
+    // 3. Sync failed event
+    svc.recordAuditEvent({
+      title: 'Sync failed',
+      detail: 'Network timeout during IndexedDB verification.',
+      status: 'offline',
+      category: 'sync',
+    });
+
+    const afterFail = svc.getAuditLog();
+    const failEvt = afterFail.find((e) => e.title === 'Sync failed');
+    assert.ok(failEvt, 'Should log a "Sync failed" audit event');
+    assert.equal(failEvt.category, 'sync');
+    assert.equal(failEvt.status, 'offline');
+
+    // 4. Clear audit log
+    svc.clearAuditLog();
+    assert.equal(svc.getAuditLog().length, 0);
+    await svc.clearAll();
+  });
 });

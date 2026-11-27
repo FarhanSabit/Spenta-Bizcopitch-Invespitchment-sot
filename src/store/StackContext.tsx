@@ -1,4 +1,13 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   BRAIN_HUBS,
   NAV_TABS,
@@ -40,8 +49,11 @@ import {
   InvestorFeedbackRecord,
   LocalPersistenceService,
   OfflineContactInquiry,
+  OfflineExportSummary,
+  PERSISTENCE_STORES,
   PersistedInvestorCalculatorState,
   PersistenceStorageMetrics,
+  SnapshotCleanupResult,
   UserWorkspaceSnapshot,
 } from '../utils/LocalPersistenceService';
 import {
@@ -55,6 +67,12 @@ import {
   SsotCurrency,
   UNIFIED_SAFE_TERMS,
 } from '../data/unifiedSsotData';
+import {
+  createPerformanceMonitor,
+  INTERNAL_DEV_STORAGE_KEY,
+  PerformanceMonitor,
+  resolveInternalDeveloperFlag,
+} from '../utils/performanceMonitor';
 
 export type InvestorCalculatorState = Omit<PersistedInvestorCalculatorState, 'updatedAt'>;
 export type SyncStatus = 'synced' | 'syncing' | 'offline';
@@ -614,8 +632,19 @@ interface StackContextValue {
   forceSync: () => Promise<boolean>;
   getStorageMetrics: () => Promise<PersistenceStorageMetrics>;
   clearLocalCachedData: () => Promise<void>;
-  exportOfflineBackup: () => Promise<void>;
+  exportOfflineBackup: () => Promise<OfflineExportSummary>;
+  autoCleanupEnabled: boolean;
+  setAutoCleanupEnabled: (enabled: boolean) => void;
+  lastAutoCleanupAt: string | null;
+  lastAutoCleanupPurgedCount: number;
+  runSnapshotCleanup: (maxAgeDays?: number) => Promise<SnapshotCleanupResult>;
   investorBriefingCachedAt: string | null;
+  // Internal developer performance & memory telemetry
+  performanceMonitor: PerformanceMonitor;
+  onProfilerRender: React.ProfilerOnRenderCallback;
+  isInternalDeveloper: boolean;
+  setInternalDeveloperMode: (enabled: boolean) => void;
+  toggleInternalDeveloperMode: () => void;
 }
 
 const StackContext = createContext<StackContextValue | null>(null);
@@ -836,6 +865,83 @@ function loadStoredNeuralCoreState(): NeuralCoreState {
 }
 
 export function StackProvider({ children }: { children: React.ReactNode }) {
+  const providerRenderStartMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  const providerRenderCountRef = useRef<number>(0);
+  const performanceMonitor = useMemo(() => createPerformanceMonitor(), []);
+  const [isInternalDeveloper, setIsInternalDeveloper] = useState<boolean>(
+    () => resolveInternalDeveloperFlag().isInternalDeveloper,
+  );
+
+  const setInternalDeveloperMode = useCallback(
+    (enabled: boolean) => {
+      setIsInternalDeveloper(enabled);
+      try {
+        window.localStorage.setItem(INTERNAL_DEV_STORAGE_KEY, enabled ? '1' : '0');
+      } catch {
+        // ignore storage errors
+      }
+      if (enabled) {
+        performanceMonitor.sampleMemory(true);
+      }
+    },
+    [performanceMonitor],
+  );
+
+  const toggleInternalDeveloperMode = useCallback(() => {
+    setIsInternalDeveloper((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(INTERNAL_DEV_STORAGE_KEY, next ? '1' : '0');
+      } catch {
+        // ignore storage errors
+      }
+      if (next) {
+        performanceMonitor.sampleMemory(true);
+      }
+      return next;
+    });
+  }, [performanceMonitor]);
+
+  const onProfilerRender = useCallback<React.ProfilerOnRenderCallback>(
+    (id, phase, actualDuration, baseDuration, _startTime, commitTime) => {
+      if (id === 'SystemHealthFooter') return;
+      const epochTimestamp =
+        typeof performance !== 'undefined' && typeof performance.timeOrigin === 'number'
+          ? performance.timeOrigin + commitTime
+          : Date.now();
+      performanceMonitor.recordRender(id, phase, actualDuration, baseDuration, epochTimestamp);
+    },
+    [performanceMonitor],
+  );
+
+  useLayoutEffect(() => {
+    const endMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const durationMs = Math.max(0.05, endMs - providerRenderStartMs);
+    const phase = providerRenderCountRef.current === 0 ? 'mount' : 'update';
+    providerRenderCountRef.current += 1;
+    performanceMonitor.recordRender('StackProvider', phase, durationMs, durationMs);
+  });
+
+  useEffect(() => {
+    if (!isInternalDeveloper) return;
+    performanceMonitor.sampleMemory(true);
+    const timer = window.setInterval(() => {
+      performanceMonitor.sampleMemory(true);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [isInternalDeveloper, performanceMonitor]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'd') {
+        event.preventDefault();
+        toggleInternalDeveloperMode();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleInternalDeveloperMode]);
+
   const { theme, paletteMode, setTheme, setPaletteMode, toggleTheme } = useTheme();
   const [mobileGridVisible, setMobileGridVisible] = useState<boolean>(loadStoredMobileGridVisible);
 
@@ -1157,6 +1263,15 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
   const [currency, setCurrency] = useState<SsotCurrency>('USD');
   const [personaTrack, setPersonaTrack] = useState<InvestorPersonaTrack>('financial');
   const [bookmarkedDocIds, setBookmarkedDocIds] = useState<string[]>([]);
+  const [autoCleanupEnabled, setAutoCleanupEnabledState] = useState<boolean>(() => {
+    try {
+      return window.localStorage.getItem('spenta_auto_cleanup_30d') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [lastAutoCleanupAt, setLastAutoCleanupAt] = useState<string | null>(null);
+  const [lastAutoCleanupPurgedCount, setLastAutoCleanupPurgedCount] = useState<number>(0);
   const [investorFeedback, setInvestorFeedback] = useState<InvestorFeedbackRecord[]>([]);
   const [contactInquiries, setContactInquiries] = useState<OfflineContactInquiry[]>([]);
   const [dataRoomOpen, setDataRoomOpen] = useState<boolean>(false);
@@ -1464,6 +1579,13 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
         if (match.calculatorState) {
           setInvestorCalculatorState(sanitizeInvestorCalculatorState(match.calculatorState));
         }
+        persistenceService.recordAuditEvent({
+          title: 'Workspace snapshot restored',
+          detail: `Restored snapshot "${match.name}" (${match.activeTab})`,
+          status: 'synced',
+          category: 'snapshot',
+          metadata: { snapshotId: match.id, name: match.name },
+        });
         setAutoNotice(`Restored offline workspace snapshot "${match.name}" from IndexedDB`);
       };
       const match = workspaceSnapshots.find((s) => s.id === id);
@@ -1529,6 +1651,12 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     setIsOnline(currentlyOnline);
     if (!currentlyOnline) {
       pendingOfflineSyncRef.current = true;
+      persistenceService.recordAuditEvent({
+        title: 'Sync failed',
+        detail: 'Cannot synchronize: browser network is offline. Offline mutations remain queued locally.',
+        status: 'offline',
+        category: 'sync',
+      });
       setAutoNotice('Offline mode — changes remain safely queued in local IndexedDB until connection returns');
       return false;
     }
@@ -1559,6 +1687,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
             personaTrack,
             currency,
             bookmarkedDocIds,
+            autoCleanupSnapshots30d: autoCleanupEnabled,
           }),
           persistenceService.saveInvestorBriefingCache(buildInvestorBriefingCacheInput()),
         ]);
@@ -1594,6 +1723,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     personaTrack,
     currency,
     bookmarkedDocIds,
+    autoCleanupEnabled,
     buildInvestorBriefingCacheInput,
   ]);
 
@@ -1637,23 +1767,79 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     setAutoNotice('Cleared all local IndexedDB stores and cached workspace data');
   }, [persistenceService, runTrackedPersistence]);
 
-  const exportOfflineBackup = useCallback(async (): Promise<void> => {
+  const exportOfflineBackup = useCallback(async (): Promise<OfflineExportSummary> => {
     const bundle = await persistenceService.exportAllOfflineData();
-    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const jsonPayload = JSON.stringify(bundle, null, 2);
+    const filename = `spenta-offline-storage-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    const blob = new Blob([jsonPayload], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `spenta-offline-storage-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    const scenCount = bundle.scenarios?.length ?? 0;
-    const snapCount = bundle.workspaceSnapshots?.length ?? 0;
-    setAutoNotice(
-      `Exported ${scenCount} scenario${scenCount === 1 ? '' : 's'} & ${snapCount} workspace snapshot${snapCount === 1 ? '' : 's'} JSON`,
+    const scenariosCount = bundle.scenarios?.length ?? 0;
+    const snapshotsCount = bundle.workspaceSnapshots?.length ?? 0;
+    const storeNames = [...PERSISTENCE_STORES];
+    const totalRecords = storeNames.reduce(
+      (sum, store) => sum + Object.keys(bundle.stores[store] ?? {}).length,
+      0,
     );
+    const byteSize =
+      typeof TextEncoder !== 'undefined'
+        ? new TextEncoder().encode(jsonPayload).length
+        : jsonPayload.length;
+    persistenceService.recordAuditEvent({
+      title: 'Data exported',
+      detail: `Downloaded ${filename} (${scenariosCount} scenarios, ${snapshotsCount} snapshots, ${byteSize} bytes).`,
+      status: 'synced',
+      category: 'export',
+      metadata: { filename, byteSize, schemaVersion: bundle.schemaVersion },
+    });
+    setAutoNotice(
+      `Downloaded ${filename} (${scenariosCount} scenario${scenariosCount === 1 ? '' : 's'} & ${snapshotsCount} snapshot${snapshotsCount === 1 ? '' : 's'} · v${bundle.schemaVersion})`,
+    );
+    return {
+      filename,
+      schemaVersion: bundle.schemaVersion,
+      exportedAt: bundle.exportedAt,
+      scenariosCount,
+      snapshotsCount,
+      storeNames,
+      totalRecords,
+      byteSize,
+    };
   }, [persistenceService]);
+
+  const runSnapshotCleanup = useCallback(
+    async (maxAgeDays: number = 30): Promise<SnapshotCleanupResult> => {
+      const result = await runTrackedPersistence(() =>
+        persistenceService.purgeOldSnapshots(maxAgeDays),
+      );
+      if (result.purgedCount > 0) {
+        const purgedSet = new Set(result.purgedIds);
+        setWorkspaceSnapshots((prev) => prev.filter((item) => !purgedSet.has(item.id)));
+        setAutoNotice(
+          `Auto-Cleanup purged ${result.purgedCount} snapshot${result.purgedCount === 1 ? '' : 's'} older than ${maxAgeDays} days`,
+        );
+      }
+      setLastAutoCleanupAt(new Date().toISOString());
+      setLastAutoCleanupPurgedCount(result.purgedCount);
+      return result;
+    },
+    [persistenceService, runTrackedPersistence],
+  );
+
+  const setAutoCleanupEnabled = useCallback((enabled: boolean) => {
+    setAutoCleanupEnabledState(enabled);
+    try {
+      window.localStorage.setItem('spenta_auto_cleanup_30d', String(enabled));
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
 
   // Track browser online/offline connectivity and automatically sync/reconcile on reconnect
   useEffect(() => {
@@ -1737,6 +1923,17 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
           }
           if (Array.isArray(diligencePrefs.bookmarkedDocIds)) {
             setBookmarkedDocIds(diligencePrefs.bookmarkedDocIds);
+          }
+          if (typeof diligencePrefs.autoCleanupSnapshots30d === 'boolean') {
+            setAutoCleanupEnabledState(diligencePrefs.autoCleanupSnapshots30d);
+            try {
+              window.localStorage.setItem(
+                'spenta_auto_cleanup_30d',
+                String(diligencePrefs.autoCleanupSnapshots30d),
+              );
+            } catch {
+              // ignore storage errors
+            }
           }
         } else if (briefingCache) {
           if (!urlQuery.currency && (briefingCache.currency === 'USD' || briefingCache.currency === 'BDT')) {
@@ -1872,6 +2069,7 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
             personaTrack,
             currency,
             bookmarkedDocIds,
+            autoCleanupSnapshots30d: autoCleanupEnabled,
           }),
           persistenceService.saveInvestorBriefingCache(buildInvestorBriefingCacheInput()),
         ]);
@@ -1885,10 +2083,23 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
     personaTrack,
     currency,
     bookmarkedDocIds,
+    autoCleanupEnabled,
     buildInvestorBriefingCacheInput,
     persistenceService,
     runTrackedPersistence,
   ]);
+
+  // Automatically purge workspace snapshots older than 30 days whenever Auto-Cleanup is enabled
+  useEffect(() => {
+    if (!investorCalculatorHydrated || !autoCleanupEnabled) return;
+    const cutoffMs = Date.now() - 30 * 86_400_000;
+    const hasStaleSnapshot = workspaceSnapshots.some((snap) => {
+      const ts = Date.parse(snap.updatedAt || snap.createdAt);
+      return Number.isFinite(ts) && ts < cutoffMs;
+    });
+    if (!hasStaleSnapshot) return;
+    void runSnapshotCleanup(30);
+  }, [investorCalculatorHydrated, autoCleanupEnabled, workspaceSnapshots, runSnapshotCleanup]);
 
   // Automatically persist active tab and user session metadata to IndexedDB on every change
   useEffect(() => {
@@ -2777,7 +2988,17 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
         getStorageMetrics,
         clearLocalCachedData,
         exportOfflineBackup,
+        autoCleanupEnabled,
+        setAutoCleanupEnabled,
+        lastAutoCleanupAt,
+        lastAutoCleanupPurgedCount,
+        runSnapshotCleanup,
         investorBriefingCachedAt,
+        performanceMonitor,
+        onProfilerRender,
+        isInternalDeveloper,
+        setInternalDeveloperMode,
+        toggleInternalDeveloperMode,
       }}
     >
       {children}

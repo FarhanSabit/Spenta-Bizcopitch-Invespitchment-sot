@@ -1,9 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Activity,
   AlertTriangle,
   CheckCircle2,
+  Clock,
   Database,
   Download,
+  FileJson,
+  FileSpreadsheet,
   HardDrive,
   Layers,
   Mail,
@@ -12,6 +16,7 @@ import {
   RotateCcw,
   Search,
   Trash2,
+  Upload,
   WifiOff,
   X,
 } from 'lucide-react';
@@ -30,10 +35,31 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { useStack } from '../store/StackContext';
 import {
+  OfflineExportSummary,
   PersistenceStorageMetrics,
   PersistenceStoreName,
 } from '../utils/LocalPersistenceService';
-import { SyncEventLogViewer } from './SyncEventLogViewer';
+import {
+  exportScenariosToCsv,
+  generateSampleScenariosCsv,
+  parseScenariosFromCsv,
+} from '../utils/scenarioCsv';
+import { ScenariosVsSnapshotsDonut } from './ScenariosVsSnapshotsDonut';
+import { StorageGrowthHeatmap } from './StorageGrowthHeatmap';
+import { SyncEventLogViewer, SyncExportLogRecord } from './SyncEventLogViewer';
+
+const SYNC_EXPORT_LOG_STORAGE_KEY = 'spenta_sync_export_log_v1';
+
+function loadStoredExportLogs(): SyncExportLogRecord[] {
+  try {
+    const raw = window.localStorage.getItem(SYNC_EXPORT_LOG_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as SyncExportLogRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
 
 const STORE_METADATA: Record<
   PersistenceStoreName,
@@ -159,6 +185,11 @@ export function StorageManager() {
     forceSync,
     clearLocalCachedData,
     exportOfflineBackup,
+    autoCleanupEnabled,
+    setAutoCleanupEnabled,
+    lastAutoCleanupAt,
+    lastAutoCleanupPurgedCount,
+    runSnapshotCleanup,
     savedCalculatorScenarios,
     saveCalculatorScenario,
     applyCalculatorScenario,
@@ -183,6 +214,10 @@ export function StorageManager() {
   const [loading, setLoading] = useState<boolean>(true);
   const [confirmClearOpen, setConfirmClearOpen] = useState<boolean>(false);
   const [clearing, setClearing] = useState<boolean>(false);
+  const [exportingBackup, setExportingBackup] = useState<boolean>(false);
+  const [exportToast, setExportToast] = useState<OfflineExportSummary | null>(null);
+  const [runningCleanup, setRunningCleanup] = useState<boolean>(false);
+  const [cleanupNotice, setCleanupNotice] = useState<string | null>(null);
   const [scenarioNameInput, setScenarioNameInput] = useState<string>('');
   const [scenarioSearchQuery, setScenarioSearchQuery] = useState<string>('');
   const [snapshotNameInput, setSnapshotNameInput] = useState<string>('');
@@ -191,6 +226,29 @@ export function StorageManager() {
   const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<string>>(() => new Set());
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState<boolean>(false);
   const [bulkDeleting, setBulkDeleting] = useState<boolean>(false);
+  const [exportLogRecords, setExportLogRecords] = useState<SyncExportLogRecord[]>(loadStoredExportLogs);
+  const [showLogViewer, setShowLogViewer] = useState<boolean>(() => {
+    try {
+      const stored = window.localStorage.getItem('spenta_show_sync_log_v1');
+      return stored !== null ? stored === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+  const [importingCsv, setImportingCsv] = useState<boolean>(false);
+  const csvFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const handleToggleLogViewer = useCallback(() => {
+    setShowLogViewer((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('spenta_show_sync_log_v1', String(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
 
   const refreshMetrics = useCallback(async () => {
     setLoading(true);
@@ -205,6 +263,22 @@ export function StorageManager() {
   useEffect(() => {
     void refreshMetrics();
   }, [refreshMetrics, storageRevision]);
+
+  useEffect(() => {
+    if (!exportToast) return;
+    const timer = window.setTimeout(() => {
+      setExportToast(null);
+    }, 9000);
+    return () => window.clearTimeout(timer);
+  }, [exportToast]);
+
+  useEffect(() => {
+    if (!cleanupNotice) return;
+    const timer = window.setTimeout(() => {
+      setCleanupNotice(null);
+    }, 6000);
+    return () => window.clearTimeout(timer);
+  }, [cleanupNotice]);
 
   // Prune stale IDs if items were individually removed or cache cleared
   useEffect(() => {
@@ -259,6 +333,7 @@ export function StorageManager() {
       await clearLocalCachedData();
       setSelectedScenarioIds(new Set());
       setSelectedSnapshotIds(new Set());
+      setExportLogRecords([]);
       setConfirmClearOpen(false);
       const next = await persistenceService.getStorageMetrics();
       setMetrics(next);
@@ -327,6 +402,16 @@ export function StorageManager() {
       }
       clearBulkSelection();
       setBulkDeleteDialogOpen(false);
+      persistenceService.recordAuditEvent({
+        title: 'Bulk delete performed',
+        detail: `Removed ${scenarioIdsToDelete.length} scenario${scenarioIdsToDelete.length === 1 ? '' : 's'} and ${snapshotIdsToDelete.length} workspace snapshot${snapshotIdsToDelete.length === 1 ? '' : 's'} from IndexedDB.`,
+        status: 'synced',
+        category: 'cleanup',
+        metadata: {
+          scenariosCount: scenarioIdsToDelete.length,
+          snapshotsCount: snapshotIdsToDelete.length,
+        },
+      });
       const next = await persistenceService.getStorageMetrics();
       setMetrics(next);
       setAutoNotice(
@@ -336,6 +421,86 @@ export function StorageManager() {
       setBulkDeleting(false);
     }
   };
+
+  const handleExportData = useCallback(async () => {
+    setExportingBackup(true);
+    try {
+      const summary = await exportOfflineBackup();
+      setExportToast(summary);
+
+      const syncState = persistenceService.getSyncState();
+      const newExportRecord: SyncExportLogRecord = {
+        id: `sync-export-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        timestamp: summary.exportedAt,
+        filename: summary.filename,
+        byteSize: summary.byteSize,
+        formattedSize: formatBytes(summary.byteSize),
+        scenariosCount: summary.scenariosCount,
+        snapshotsCount: summary.snapshotsCount,
+        schemaVersion: summary.schemaVersion,
+        backend: syncState.backend,
+        revision: syncState.revision,
+      };
+      setExportLogRecords((prev) => {
+        const next = [newExportRecord, ...prev].slice(0, 30);
+        try {
+          window.localStorage.setItem(SYNC_EXPORT_LOG_STORAGE_KEY, JSON.stringify(next));
+        } catch {
+          // ignore storage quota errors
+        }
+        return next;
+      });
+    } finally {
+      setExportingBackup(false);
+    }
+  }, [exportOfflineBackup, persistenceService]);
+
+  const handleClearExportLogs = useCallback(() => {
+    setExportLogRecords([]);
+    try {
+      window.localStorage.removeItem(SYNC_EXPORT_LOG_STORAGE_KEY);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
+
+  const staleSnapshotCount = useMemo(() => {
+    const cutoffMs = Date.now() - 30 * 86_400_000;
+    return workspaceSnapshots.filter((snap) => {
+      const ts = Date.parse(snap.updatedAt || snap.createdAt);
+      return Number.isFinite(ts) && ts < cutoffMs;
+    }).length;
+  }, [workspaceSnapshots]);
+
+  const handleToggleAutoCleanup = useCallback(() => {
+    const next = !autoCleanupEnabled;
+    setAutoCleanupEnabled(next);
+    if (next) {
+      setCleanupNotice(
+        staleSnapshotCount > 0
+          ? `Auto-Cleanup enabled — purging ${staleSnapshotCount} snapshot${staleSnapshotCount === 1 ? '' : 's'} older than 30 days…`
+          : 'Auto-Cleanup enabled — snapshots older than 30 days will purge automatically.',
+      );
+    } else {
+      setCleanupNotice('Auto-Cleanup disabled — snapshots older than 30 days will be retained.');
+    }
+  }, [autoCleanupEnabled, setAutoCleanupEnabled, staleSnapshotCount]);
+
+  const handleManualCleanupNow = useCallback(async () => {
+    setRunningCleanup(true);
+    try {
+      const result = await runSnapshotCleanup(30);
+      const next = await persistenceService.getStorageMetrics();
+      setMetrics(next);
+      setCleanupNotice(
+        result.purgedCount > 0
+          ? `Purged ${result.purgedCount} stale snapshot${result.purgedCount === 1 ? '' : 's'} (freed ~${formatBytes(result.freedBytesEstimate)}).`
+          : 'No named snapshots older than 30 days found.',
+      );
+    } finally {
+      setRunningCleanup(false);
+    }
+  }, [persistenceService, runSnapshotCleanup]);
 
   const handleSaveQuickScenario = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -355,12 +520,27 @@ export function StorageManager() {
     setSnapshotNameInput('');
   };
 
-  const quotaUsagePct = useMemo(() => {
-    if (!metrics || !metrics.quotaBytes || metrics.quotaBytes <= 0) return null;
-    const effectiveUsage = metrics.usageBytes ?? metrics.estimatedPayloadBytes;
-    const rawPct = (effectiveUsage / metrics.quotaBytes) * 100;
-    return Math.min(100, Math.max(effectiveUsage > 0 ? 0.5 : 0, rawPct));
+  const effectiveQuotaBytes = useMemo(() => {
+    if (metrics?.quotaBytes && metrics.quotaBytes > 0) {
+      return metrics.quotaBytes;
+    }
+    // Estimated default browser quota (50 GB standard allocation in modern browsers)
+    return 50 * 1024 * 1024 * 1024;
   }, [metrics]);
+
+  const effectiveUsageBytes = useMemo(() => {
+    return metrics?.usageBytes ?? metrics?.estimatedPayloadBytes ?? 0;
+  }, [metrics]);
+
+  const remainingQuotaBytes = useMemo(() => {
+    return Math.max(0, effectiveQuotaBytes - effectiveUsageBytes);
+  }, [effectiveQuotaBytes, effectiveUsageBytes]);
+
+  const quotaUsagePct = useMemo(() => {
+    if (effectiveQuotaBytes <= 0) return 0;
+    const rawPct = (effectiveUsageBytes / effectiveQuotaBytes) * 100;
+    return Math.min(100, Math.max(effectiveUsageBytes > 0 ? 0.01 : 0, rawPct));
+  }, [effectiveQuotaBytes, effectiveUsageBytes]);
 
   const scenarioAndWorkspaceCount = useMemo(() => {
     if (!metrics) return 0;
@@ -501,6 +681,90 @@ export function StorageManager() {
     setAutoNotice('Opened default email client with session summary & shared snapshot link');
   }, [buildSessionMailtoUrl, setAutoNotice]);
 
+  const handleImportCsvFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      e.target.value = '';
+
+      setImportingCsv(true);
+      try {
+        const text = await file.text();
+        const result = parseScenariosFromCsv(text);
+        if (result.scenarios.length === 0) {
+          setAutoNotice(
+            `CSV import failed: ${result.errors[0] || 'No valid scenario rows found in file.'}`,
+          );
+          return;
+        }
+
+        let importedCount = 0;
+        for (const item of result.scenarios) {
+          await saveCalculatorScenario(item.name, item.description ?? 'Imported via CSV');
+          importedCount++;
+        }
+
+        persistenceService.recordAuditEvent({
+          title: 'Scenarios imported from CSV',
+          detail: `Imported ${importedCount} scenario${importedCount === 1 ? '' : 's'} from "${file.name}" (${formatBytes(file.size)}).`,
+          status: 'synced',
+          category: 'scenario',
+          metadata: {
+            filename: file.name,
+            count: importedCount,
+            fileSize: file.size,
+          },
+        });
+
+        const next = await persistenceService.getStorageMetrics();
+        setMetrics(next);
+        setAutoNotice(
+          `Successfully imported ${importedCount} scenario${importedCount === 1 ? '' : 's'} from ${file.name} into IndexedDB`,
+        );
+      } catch (err) {
+        setAutoNotice(
+          `Failed to parse CSV file: ${err instanceof Error ? err.message : 'Unknown error'}`,
+        );
+      } finally {
+        setImportingCsv(false);
+      }
+    },
+    [persistenceService, saveCalculatorScenario, setAutoNotice],
+  );
+
+  const handleDownloadSampleCsv = useCallback(() => {
+    const sample = generateSampleScenariosCsv();
+    const blob = new Blob([sample], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'spenta-scenario-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setAutoNotice('Downloaded sample scenario CSV template');
+  }, [setAutoNotice]);
+
+  const handleExportScenariosCsv = useCallback(() => {
+    if (savedCalculatorScenarios.length === 0) {
+      setAutoNotice('No saved scenarios to export as CSV');
+      return;
+    }
+    const csv = exportScenariosToCsv(savedCalculatorScenarios);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    a.download = `spenta-scenarios-${dateStamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setAutoNotice(`Exported ${savedCalculatorScenarios.length} scenarios as CSV`);
+  }, [savedCalculatorScenarios, setAutoNotice]);
+
   const filteredScenarios = useMemo(() => {
     const q = scenarioSearchQuery.trim().toLowerCase();
     if (!q) return savedCalculatorScenarios;
@@ -567,14 +831,37 @@ export function StorageManager() {
               <span>Force Sync</span>
             </button>
 
+            <input
+              ref={csvFileInputRef}
+              type="file"
+              accept=".csv,text/csv"
+              data-testid="scenario-csv-input"
+              onChange={handleImportCsvFile}
+              className="hidden"
+              aria-label="Upload CSV to import scenarios"
+            />
+
+            <button
+              type="button"
+              data-testid="storage-import-csv-btn"
+              onClick={() => csvFileInputRef.current?.click()}
+              disabled={importingCsv}
+              title="Upload a CSV file to import scenario data directly into local IndexedDB storage"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1F3863] dark:hover:border-[#8FA6E8] transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
+            >
+              <Upload className="w-3.5 h-3.5 text-[#1F3863] dark:text-[#8FA6E8]" strokeWidth={1.6} />
+              <span>{importingCsv ? 'Importing…' : 'Import CSV'}</span>
+            </button>
+
             <button
               type="button"
               data-testid="storage-export-data-btn"
-              onClick={() => void exportOfflineBackup()}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1C6E46] dark:hover:border-[#6FCB9F] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              onClick={() => void handleExportData()}
+              disabled={exportingBackup}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1C6E46] dark:hover:border-[#6FCB9F] transition-colors whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-60"
             >
               <Download className="w-3.5 h-3.5" strokeWidth={1.6} />
-              <span>Export Data</span>
+              <span>{exportingBackup ? 'Exporting…' : 'Export Data'}</span>
             </button>
 
             <button
@@ -677,6 +964,80 @@ export function StorageManager() {
           </div>
         )}
 
+        {/* Storage Quota Progress Bar (Visual indicator of usage vs estimated browser IndexedDB quota) */}
+        <div
+          data-testid="header-storage-quota-progress"
+          className="mt-5 p-4 rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529]"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2.5">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-[#EBF1FA] dark:bg-[#1A2342] text-[#1F3863] dark:text-[#8FA6E8] flex items-center justify-center shrink-0">
+                <HardDrive className="w-3.5 h-3.5" strokeWidth={1.8} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-[#16213A] dark:text-[#E7EBF5]">
+                  Browser Storage Quota & Capacity
+                </span>
+                <span className="text-[11px] text-[#5F6576] dark:text-[#8E96B0] block sm:inline sm:ml-2">
+                  (Estimated IndexedDB persistent storage allocation)
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3 text-xs font-mono tabular-nums">
+              <span
+                data-testid="header-storage-usage-text"
+                className="text-[#16213A] dark:text-[#E7EBF5] font-semibold"
+              >
+                Used: {formatBytes(effectiveUsageBytes)}
+              </span>
+              <span className="text-[#C4CDD5] dark:text-[#3B4564]" aria-hidden="true">|</span>
+              <span
+                data-testid="header-storage-remaining-text"
+                className="text-[#1C6E46] dark:text-[#6FCB9F] font-semibold"
+              >
+                Free: {formatBytes(remainingQuotaBytes)}
+              </span>
+              <span className="text-[#C4CDD5] dark:text-[#3B4564]" aria-hidden="true">|</span>
+              <span className="text-[#5F6576] dark:text-[#8E96B0]">
+                Quota: {formatBytes(effectiveQuotaBytes)}
+              </span>
+            </div>
+          </div>
+
+          {/* Progress Bar Track */}
+          <div className="w-full bg-[#E4DFD6] dark:bg-[#232B4A] h-2.5 rounded-full overflow-hidden relative">
+            <div
+              data-testid="header-storage-quota-bar"
+              role="progressbar"
+              aria-label="Current storage usage against estimated browser IndexedDB quota"
+              aria-valuenow={Math.round(quotaUsagePct)}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              className={`h-full transition-all duration-500 rounded-full ${
+                quotaUsagePct >= 90
+                  ? 'bg-[#DC2626]'
+                  : quotaUsagePct >= 75
+                  ? 'bg-[#D97706]'
+                  : 'bg-[#1F3863] dark:bg-[#8FA6E8]'
+              }`}
+              style={{ width: `${Math.max(quotaUsagePct, effectiveUsageBytes > 0 ? 0.75 : 0)}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-[11px] mt-2 text-[#5F6576] dark:text-[#8E96B0] font-mono tabular-nums">
+            <span className="font-semibold text-[#1F3863] dark:text-[#8FA6E8]">
+              {quotaUsagePct < 0.01 && effectiveUsageBytes > 0
+                ? '< 0.01%'
+                : `${quotaUsagePct.toFixed(2)}%`}{' '}
+              consumed
+            </span>
+            <span>
+              {formatBytes(remainingQuotaBytes)} headroom available for offline scenarios & snapshots
+            </span>
+          </div>
+        </div>
+
         {/* 4-Column KPI Summary Strip (Tabular Numerals) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-5">
           <div className="p-4 rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529]">
@@ -773,6 +1134,13 @@ export function StorageManager() {
           </div>
         </div>
       </div>
+
+      {/* Recharts Donut: Scenarios vs. Workspace Snapshots Allocation */}
+      <ScenariosVsSnapshotsDonut
+        scenarios={savedCalculatorScenarios}
+        snapshots={workspaceSnapshots}
+        totalDbBytes={metrics?.estimatedPayloadBytes ?? 0}
+      />
 
       {/* Storage Breakdown by Item Type (Recharts Donut + Ranked Horizontal Bar Chart) */}
       <div
@@ -1004,6 +1372,12 @@ export function StorageManager() {
           ))}
         </div>
       </div>
+
+      {/* D3.js Storage Accumulation Hot-Spot Heatmap (Scenarios vs. Snapshots) */}
+      <StorageGrowthHeatmap
+        scenarios={savedCalculatorScenarios}
+        snapshots={workspaceSnapshots}
+      />
 
       {/* Store-by-Store IndexedDB Breakdown Table */}
       <div className="rounded-2xl border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] overflow-hidden">
@@ -1249,6 +1623,48 @@ export function StorageManager() {
             </button>
           </form>
 
+          {/* CSV Actions for Investor Scenarios */}
+          <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-[#FAF8F4] dark:bg-[#0B1020] border border-[#E4DFD6] dark:border-[#232B4A]">
+            <div className="flex items-center gap-1.5 text-xs text-[#5F6576] dark:text-[#8E96B0]">
+              <FileSpreadsheet className="w-3.5 h-3.5 text-[#1C6E46] dark:text-[#6FCB9F]" strokeWidth={1.6} />
+              <span className="font-semibold text-[#16213A] dark:text-[#E7EBF5]">CSV Scenarios:</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="scenario-sample-csv-btn"
+                onClick={handleDownloadSampleCsv}
+                title="Download sample CSV template with pre-built scenario rows"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border border-[#E4DFD6] dark:border-[#232B4A] hover:bg-white dark:hover:bg-[#141A32] text-[#5F6576] dark:text-[#8E96B0] hover:text-[#16213A] dark:hover:text-[#E7EBF5] transition-colors cursor-pointer"
+              >
+                <Download className="w-3 h-3" />
+                <span>Template</span>
+              </button>
+              <button
+                type="button"
+                data-testid="scenario-import-csv-inline-btn"
+                onClick={() => csvFileInputRef.current?.click()}
+                disabled={importingCsv}
+                title="Upload CSV file with scenario data to IndexedDB"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-semibold bg-[#1F3863] text-white dark:bg-[#8FA6E8] dark:text-[#0B1020] hover:opacity-90 transition-opacity cursor-pointer disabled:opacity-50"
+              >
+                <Upload className="w-3 h-3" />
+                <span>{importingCsv ? 'Importing…' : 'Upload CSV'}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="scenario-export-csv-btn"
+                onClick={handleExportScenariosCsv}
+                disabled={savedCalculatorScenarios.length === 0}
+                title="Export saved investor scenarios to CSV file"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border border-[#E4DFD6] dark:border-[#232B4A] hover:bg-white dark:hover:bg-[#141A32] text-[#5F6576] dark:text-[#8E96B0] hover:text-[#16213A] dark:hover:text-[#E7EBF5] transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Download className="w-3 h-3" />
+                <span>Export CSV</span>
+              </button>
+            </div>
+          </div>
+
           {/* Search Saved Scenarios by Name */}
           <div className="mt-2.5 relative">
             <Search
@@ -1399,6 +1815,85 @@ export function StorageManager() {
             </span>
           </div>
 
+          {/* 30-Day Snapshot Auto-Cleanup Policy Control */}
+          <div
+            data-testid="auto-cleanup-panel"
+            className="mt-3 rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] px-3.5 py-2.5 space-y-2"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <Clock
+                  className="w-3.5 h-3.5 text-[#1C6E46] dark:text-[#6FCB9F] mt-0.5 shrink-0"
+                  strokeWidth={1.75}
+                />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5]">
+                    Auto-Cleanup (&gt;30 days)
+                  </div>
+                  <p className="text-[11px] text-[#5F6576] dark:text-[#8E96B0] leading-snug">
+                    Automatically purge saved snapshots older than 30 days to free persistent storage.
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={autoCleanupEnabled}
+                aria-label="Toggle 30-day automatic snapshot cleanup"
+                data-testid="auto-cleanup-toggle"
+                onClick={handleToggleAutoCleanup}
+                className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors cursor-pointer ${
+                  autoCleanupEnabled
+                    ? 'bg-[#1C6E46] border-[#1C6E46] dark:bg-[#6FCB9F] dark:border-[#6FCB9F]'
+                    : 'bg-[#E4DFD6] border-[#D5CEC2] dark:bg-[#232B4A] dark:border-[#323D66]'
+                }`}
+              >
+                <span
+                  className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white dark:bg-[#0B1020] shadow-xs transition-transform ${
+                    autoCleanupEnabled ? 'translate-x-4.5' : 'translate-x-0.5'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-[#E4DFD6]/70 dark:border-[#232B4A] text-[11px] font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0]">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span>{staleSnapshotCount} &gt;30d eligible</span>
+                {lastAutoCleanupAt && (
+                  <>
+                    <span aria-hidden="true">·</span>
+                    <span>
+                      Last sweep {formatTimestamp(lastAutoCleanupAt)} ({lastAutoCleanupPurgedCount} purged)
+                    </span>
+                  </>
+                )}
+              </div>
+              {staleSnapshotCount > 0 && (
+                <button
+                  type="button"
+                  data-testid="run-cleanup-now-btn"
+                  onClick={() => void handleManualCleanupNow()}
+                  disabled={runningCleanup}
+                  className="font-sans text-[11px] font-semibold text-[#1C6E46] dark:text-[#6FCB9F] hover:underline cursor-pointer disabled:opacity-50"
+                >
+                  {runningCleanup ? 'Purging…' : 'Purge Old Now'}
+                </button>
+              )}
+            </div>
+
+            {cleanupNotice && (
+              <div
+                role="status"
+                aria-live="polite"
+                data-testid="auto-cleanup-status"
+                className="text-[11px] text-[#1C6E46] dark:text-[#6FCB9F] font-medium"
+              >
+                {cleanupNotice}
+              </div>
+            )}
+          </div>
+
           <form onSubmit={handleSaveQuickSnapshot} className="mt-3 flex items-center gap-2">
             <input
               type="text"
@@ -1505,8 +2000,138 @@ export function StorageManager() {
         </div>
       </div>
 
-      {/* Sync Event Log Viewer */}
-      <SyncEventLogViewer />
+      {/* Scrollable Sync Event Log Viewer Section with Show/Hide Toggle Switch */}
+      <div
+        data-testid="sync-log-section"
+        className="space-y-3"
+      >
+        <div
+          data-testid="sync-log-toggle-panel"
+          className="rounded-2xl border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A] flex items-center justify-center shrink-0">
+              <Activity className="w-4 h-4 text-[#1F3863] dark:text-[#8FA6E8]" strokeWidth={1.75} />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-sm font-bold text-[#16213A] dark:text-[#E7EBF5]">
+                  Sync Event Audit Stream
+                </h3>
+                <span
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
+                    showLogViewer
+                      ? 'bg-[#ECFDF5] dark:bg-[#0D261C] text-[#1C6E46] dark:text-[#6FCB9F] border-[#A7F3D0] dark:border-[#1E4D36]'
+                      : 'bg-[#FAF8F4] dark:bg-[#0F1529] text-[#5F6576] dark:text-[#8E96B0] border-[#E4DFD6] dark:border-[#232B4A]'
+                  }`}
+                >
+                  {showLogViewer ? 'Visible' : 'Hidden'}
+                </span>
+              </div>
+              <p className="text-xs text-[#5F6576] dark:text-[#8E96B0] mt-0.5">
+                {showLogViewer
+                  ? 'Showing live time-stamped sync events, scenario saves, cleanups, and export records.'
+                  : 'Audit log viewer is hidden to keep your dashboard layout compact.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
+            <label
+              htmlFor="toggle-log-viewer-switch"
+              className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5] cursor-pointer select-none"
+            >
+              {showLogViewer ? 'Hide Log' : 'Show Log'}
+            </label>
+            <button
+              id="toggle-log-viewer-switch"
+              type="button"
+              role="switch"
+              aria-checked={showLogViewer}
+              aria-label="Toggle sync event log viewer visibility"
+              data-testid="toggle-log-viewer-switch"
+              onClick={handleToggleLogViewer}
+              className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full border transition-colors cursor-pointer ${
+                showLogViewer
+                  ? 'bg-[#1F3863] border-[#1F3863] dark:bg-[#8FA6E8] dark:border-[#8FA6E8]'
+                  : 'bg-[#E4DFD6] border-[#D5CEC2] dark:bg-[#232B4A] dark:border-[#323D66]'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white dark:bg-[#0B1020] shadow-xs transition-transform ${
+                  showLogViewer ? 'translate-x-4.5' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable Log Viewer (conditionally rendered when showLogViewer is true) */}
+        {showLogViewer && (
+          <SyncEventLogViewer
+            exportRecords={exportLogRecords}
+            onClearExports={handleClearExportLogs}
+          />
+        )}
+      </div>
+
+      {/* JSON Export Completion Toast Notification */}
+      {exportToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          data-testid="storage-export-toast"
+          className="fixed bottom-5 right-5 z-50 w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-[#1C6E46]/35 dark:border-[#6FCB9F]/35 bg-white dark:bg-[#141A32] p-4 shadow-2xl"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <div className="w-8 h-8 rounded-lg bg-[#1C6E46]/10 dark:bg-[#6FCB9F]/15 border border-[#1C6E46]/25 dark:border-[#6FCB9F]/30 flex items-center justify-center shrink-0">
+                <CheckCircle2
+                  className="w-4 h-4 text-[#1C6E46] dark:text-[#6FCB9F]"
+                  strokeWidth={1.85}
+                />
+              </div>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-[#16213A] dark:text-[#E7EBF5]">
+                  JSON Export Downloaded
+                </div>
+                <div className="mt-1 flex items-center gap-1.5 text-[11px] font-mono text-[#1F3863] dark:text-[#8FA6E8] truncate">
+                  <FileJson className="w-3.5 h-3.5 shrink-0" strokeWidth={1.7} />
+                  <span data-testid="export-toast-filename" className="truncate font-semibold">
+                    {exportToast.filename}
+                  </span>
+                  <span className="text-[#5F6576] dark:text-[#8E96B0] tabular-nums shrink-0">
+                    ({formatBytes(exportToast.byteSize)})
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setExportToast(null)}
+              aria-label="Dismiss export notification"
+              className="p-1 rounded-md text-[#5F6576] dark:text-[#8E96B0] hover:text-[#16213A] dark:hover:text-[#E7EBF5] cursor-pointer shrink-0"
+            >
+              <X className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </button>
+          </div>
+
+          <div
+            data-testid="export-toast-structure"
+            className="mt-3 rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] px-3 py-2 space-y-1 text-[11px] font-mono tabular-nums text-[#4A5568] dark:text-[#A4ADC6]"
+          >
+            <div className="text-[#16213A] dark:text-[#E7EBF5] font-semibold">
+              Verified Data Structure (schemaVersion: {exportToast.schemaVersion})
+            </div>
+            <div>
+              exportedAt: {formatTimestamp(exportToast.exportedAt)}
+            </div>
+            <div>
+              scenarios[{exportToast.scenariosCount}] · workspaceSnapshots[{exportToast.snapshotsCount}] · stores&#123;{exportToast.storeNames.length}&#125; ({exportToast.totalRecords} records)
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

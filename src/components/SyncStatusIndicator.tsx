@@ -25,6 +25,7 @@ export function SyncStatusIndicator({ compact = false }: SyncStatusIndicatorProp
   const [observedState, setObservedState] = useState<PersistenceSyncState>(() =>
     persistenceService.getSyncState(),
   );
+  const [tooltipOpen, setTooltipOpen] = useState<boolean>(false);
 
   useEffect(() => {
     return persistenceService.subscribe((next) => {
@@ -40,6 +41,24 @@ export function SyncStatusIndicator({ compact = false }: SyncStatusIndicatorProp
       : 'synced';
   const effectiveLastSyncedAt = lastSyncedAt ?? observedState.lastSyncedAt;
 
+  const queuedOfflineChanges = observedState.pendingUnsyncedCount ?? 0;
+  const activeWrites = observedState.activeOperations ?? 0;
+  const totalPendingChanges = queuedOfflineChanges + activeWrites;
+  const pendingStores = observedState.pendingUnsyncedStores ?? [];
+
+  const nextAutoSyncLabel =
+    effectiveStatus === 'offline'
+      ? 'Automatic on reconnect'
+      : effectiveStatus === 'syncing'
+        ? 'In progress now'
+        : totalPendingChanges > 0
+          ? 'Pending auto-reconcile'
+          : 'Auto-save on edit (150ms debounce)';
+
+  const pendingSummaryText = `${totalPendingChanges} pending unsynced change${
+    totalPendingChanges === 1 ? '' : 's'
+  } in IndexedDB`;
+
   const statusConfig =
     effectiveStatus === 'offline'
       ? {
@@ -47,7 +66,7 @@ export function SyncStatusIndicator({ compact = false }: SyncStatusIndicatorProp
           colorClass: 'text-[#B91C1C] dark:text-[#FCA5A5]',
           Icon: WifiOff,
           spin: false,
-          detail: 'Offline — changes are stored locally in IndexedDB until connection returns.',
+          detail: `Offline — ${pendingSummaryText} before next automatic sync on reconnect.`,
         }
       : effectiveStatus === 'syncing'
         ? {
@@ -55,14 +74,14 @@ export function SyncStatusIndicator({ compact = false }: SyncStatusIndicatorProp
             colorClass: 'text-[#B45309] dark:text-[#FCD34D]',
             Icon: RefreshCw,
             spin: true,
-            detail: 'Synchronizing local IndexedDB stores…',
+            detail: `Synchronizing local IndexedDB stores — ${pendingSummaryText}.`,
           }
         : {
             label: 'Synced',
             colorClass: 'text-[#1C6E46] dark:text-[#6FCB9F]',
             Icon: CheckCircle2,
             spin: false,
-            detail: `IndexedDB synced (${observedState.backend}) · Last update ${formatSyncTime(effectiveLastSyncedAt)}`,
+            detail: `IndexedDB synced (${observedState.backend}) · ${pendingSummaryText} · Last sync ${formatSyncTime(effectiveLastSyncedAt)}`,
           };
 
   const StatusIcon = statusConfig.Icon;
@@ -74,12 +93,25 @@ export function SyncStatusIndicator({ compact = false }: SyncStatusIndicatorProp
 
   return (
     <div
-      className={`inline-flex items-center rounded-md border border-[#E4DFD6] dark:border-[#232B4A] bg-[#F2EFE9] dark:bg-[#141A32] shrink-0 whitespace-nowrap ${
+      className={`relative inline-flex items-center rounded-md border border-[#E4DFD6] dark:border-[#232B4A] bg-[#F2EFE9] dark:bg-[#141A32] shrink-0 whitespace-nowrap ${
         compact ? 'w-full justify-between h-11 px-3' : 'h-8'
       }`}
       role="status"
       aria-live="polite"
       title={statusConfig.detail}
+      onMouseEnter={() => setTooltipOpen(true)}
+      onMouseLeave={() => setTooltipOpen(false)}
+      onFocus={() => setTooltipOpen(true)}
+      onBlur={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setTooltipOpen(false);
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') {
+          setTooltipOpen(false);
+        }
+      }}
     >
       <span
         className={`inline-flex items-center gap-1.5 text-[11px] font-medium whitespace-nowrap ${
@@ -105,15 +137,15 @@ export function SyncStatusIndicator({ compact = false }: SyncStatusIndicatorProp
         disabled={forceDisabled}
         aria-label={
           !effectiveOnline
-            ? 'Force Sync unavailable while offline'
+            ? `Force Sync unavailable while offline (${pendingSummaryText})`
             : effectiveStatus === 'syncing'
-              ? 'Synchronization in progress'
-              : 'Force Sync local IndexedDB storage against master workspace state'
+              ? `Synchronization in progress (${pendingSummaryText})`
+              : `Force Sync local IndexedDB storage (${pendingSummaryText})`
         }
         title={
           !effectiveOnline
-            ? 'Connection unavailable — reconnect to run Force Sync'
-            : `Re-verify local IndexedDB stores against workspace state (Last sync: ${formatSyncTime(effectiveLastSyncedAt)})`
+            ? `Connection unavailable — ${pendingSummaryText} queued until reconnect`
+            : `Re-verify local IndexedDB stores (${pendingSummaryText} · Last sync: ${formatSyncTime(effectiveLastSyncedAt)})`
         }
         className={`inline-flex items-center gap-1 text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1F3863] dark:focus-visible:ring-[#8FA6E8] rounded-r-md ${
           compact ? 'px-2.5 py-1.5 min-h-[36px]' : 'px-2 h-full'
@@ -130,6 +162,77 @@ export function SyncStatusIndicator({ compact = false }: SyncStatusIndicatorProp
         />
         <span>Force Sync</span>
       </button>
+
+      {/* Detailed Hover / Focus Tooltip */}
+      {tooltipOpen && (
+        <div
+          role="tooltip"
+          data-testid="sync-status-tooltip"
+          className={`absolute top-full mt-2 z-50 w-72 sm:w-80 rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] p-3.5 shadow-xl text-left whitespace-normal ${
+            compact ? 'left-0' : 'right-0'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-2 pb-2 border-b border-[#E4DFD6] dark:border-[#232B4A]">
+            <span className={`text-xs font-bold ${statusConfig.colorClass}`}>
+              IndexedDB {statusConfig.label}
+            </span>
+            <span className="text-[11px] font-mono text-[#5F6576] dark:text-[#8E96B0]">
+              {observedState.backend === 'fallback' ? 'LocalStorage fallback' : 'IndexedDB (idb)'}
+            </span>
+          </div>
+
+          <div className="mt-2.5 space-y-2 text-[11px]">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-[#5F6576] dark:text-[#8E96B0]">
+                Pending Unsynced Changes
+              </span>
+              <span
+                data-testid="sync-tooltip-pending-count"
+                className={`font-mono tabular-nums font-bold ${
+                  totalPendingChanges > 0
+                    ? 'text-[#B45309] dark:text-[#FCD34D]'
+                    : 'text-[#1C6E46] dark:text-[#6FCB9F]'
+                }`}
+              >
+                {totalPendingChanges}
+              </span>
+            </div>
+
+            <div className="text-[#4A5568] dark:text-[#A4ADC6] leading-snug">
+              {totalPendingChanges === 0
+                ? 'All local IndexedDB object stores are reconciled with 0 pending changes.'
+                : `${totalPendingChanges} unsynced local change${totalPendingChanges === 1 ? '' : 's'} remaining in IndexedDB before the next automatic sync.`}
+            </div>
+
+            {pendingStores.length > 0 && (
+              <div className="font-mono text-[10px] text-[#5F6576] dark:text-[#8E96B0] break-words">
+                Queued stores: {pendingStores.join(' · ')}
+              </div>
+            )}
+
+            <div className="pt-2 border-t border-[#E4DFD6] dark:border-[#232B4A] space-y-1 font-mono tabular-nums text-[10px] text-[#5F6576] dark:text-[#8E96B0]">
+              <div className="flex items-center justify-between gap-2">
+                <span>Next Auto-Sync</span>
+                <span className="text-[#16213A] dark:text-[#E7EBF5] font-medium">
+                  {nextAutoSyncLabel}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>Last Synced</span>
+                <span className="text-[#16213A] dark:text-[#E7EBF5]">
+                  {formatSyncTime(effectiveLastSyncedAt)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span>Store Revision</span>
+                <span className="text-[#16213A] dark:text-[#E7EBF5]">
+                  #{observedState.revision}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

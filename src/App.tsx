@@ -9,6 +9,7 @@ import { GlobalSearchBar } from './components/GlobalSearchBar';
 import { SpentaThemeView } from './components/SpentaThemeView';
 import { MobileGridToggle } from './components/MobileGridToggle';
 import { ResilientErrorBoundary } from './components/ResilientErrorBoundary';
+import { SystemHealthFooter } from './components/SystemHealthFooter';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 import {
   aiAssistantImporter,
@@ -99,6 +100,7 @@ function PortalShell() {
     arPreviewTarget,
     isInvestorBriefingRoute,
     exitInvestorBriefing,
+    onProfilerRender,
   } = useStack();
   const { theme } = useTheme();
   const [hasOpenedDrawer, setHasOpenedDrawer] = useState(drawerOpen);
@@ -216,7 +218,9 @@ function PortalShell() {
         </ResilientErrorBoundary>
       ) : (
         <div className="min-h-screen spenta-canvas print:bg-white print:text-zinc-950 print:min-h-0 flex flex-col overflow-x-hidden print:overflow-visible transition-colors duration-150">
-          <Navbar />
+          <React.Profiler id="Navbar" onRender={onProfilerRender}>
+            <Navbar />
+          </React.Profiler>
 
           <main className="flex-1 max-w-[1440px] w-full mx-auto px-3.5 sm:px-6 py-5 sm:py-6 print:max-w-none print:p-0">
             {envNotice && (
@@ -306,49 +310,54 @@ function PortalShell() {
             >
               <SpentaThemeView viewId={activeTab}>
                 <Suspense fallback={<ViewLoadingFallback />}>
-                  {activeTab === 'App Vault' && <SpentaBrainVault />}
-                  {activeTab === 'Investor Briefing' && <InvestorBriefingView />}
-                  {activeTab === 'Infographics' && <InfographicsView />}
-                  {activeTab === 'Financials' && <FinancialsView />}
-                  {activeTab === 'Spenta Core' && <SpentaCoreView />}
-                  {activeTab === 'The Brain' && <TheBrainView />}
-                  {activeTab === 'Pitch Deck' && <PitchDeckView />}
-                  {activeTab === 'Resources' && <ResourcesView />}
+                  <React.Profiler id={activeTab} onRender={onProfilerRender}>
+                    {activeTab === 'App Vault' && <SpentaBrainVault />}
+                    {activeTab === 'Investor Briefing' && <InvestorBriefingView />}
+                    {activeTab === 'Infographics' && <InfographicsView />}
+                    {activeTab === 'Financials' && <FinancialsView />}
+                    {activeTab === 'Spenta Core' && <SpentaCoreView />}
+                    {activeTab === 'The Brain' && <TheBrainView />}
+                    {activeTab === 'Pitch Deck' && <PitchDeckView />}
+                    {activeTab === 'Resources' && <ResourcesView />}
+                  </React.Profiler>
                 </Suspense>
               </SpentaThemeView>
             </ResilientErrorBoundary>
           </main>
 
           <footer className="spenta-band spenta-muted border-t mt-10 no-print">
-            <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs">
-              <div className="flex items-center gap-3 min-w-0">
-                <SpentaLogo className="h-6 sm:h-7" tone={theme === 'dark' ? 'dark-bg' : 'light-bg'} />
-                <span className="h-3.5 w-px bg-[#CFC8BC] dark:bg-[#232B4A] shrink-0" />
-                <span className="font-mono text-[11px] spenta-muted truncate">
-                  Sovereign AI · ERP · Fintech · Voice · Spatial XR
-                </span>
+            <div className="max-w-[1440px] mx-auto px-4 sm:px-6 py-5 space-y-3 text-xs">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <SpentaLogo className="h-6 sm:h-7" tone={theme === 'dark' ? 'dark-bg' : 'light-bg'} />
+                  <span className="h-3.5 w-px bg-[#CFC8BC] dark:bg-[#232B4A] shrink-0" />
+                  <span className="font-mono text-[11px] spenta-muted truncate">
+                    Sovereign AI · ERP · Fintech · Voice · Spatial XR
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px]">
+                  <span>San Jose · Australia · 20-FTE Dhaka R&amp;D Hub</span>
+                  <span className="text-[#CFC8BC] dark:text-[#333F69]" aria-hidden="true">
+                    ·
+                  </span>
+                  <button
+                    type="button"
+                    {...getTabPreloadHandlers('Resources')}
+                    onClick={() => {
+                      setActiveTab('Resources');
+                      window.setTimeout(() => {
+                        document
+                          .getElementById('spenta-proposal-form')
+                          ?.scrollIntoView({ behavior: 'smooth' });
+                      }, 80);
+                    }}
+                    className="spenta-positive hover:underline cursor-pointer"
+                  >
+                    {SPENTA_CONTACT_EMAIL}
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px]">
-                <span>San Jose · Australia · 20-FTE Dhaka R&amp;D Hub</span>
-                <span className="text-[#CFC8BC] dark:text-[#333F69]" aria-hidden="true">
-                  ·
-                </span>
-                <button
-                  type="button"
-                  {...getTabPreloadHandlers('Resources')}
-                  onClick={() => {
-                    setActiveTab('Resources');
-                    window.setTimeout(() => {
-                      document
-                        .getElementById('spenta-proposal-form')
-                        ?.scrollIntoView({ behavior: 'smooth' });
-                    }, 80);
-                  }}
-                  className="spenta-positive hover:underline cursor-pointer"
-                >
-                  {SPENTA_CONTACT_EMAIL}
-                </button>
-              </div>
+              <SystemHealthFooter />
             </div>
           </footer>
 

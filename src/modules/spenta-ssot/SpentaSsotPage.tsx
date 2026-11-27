@@ -5,6 +5,7 @@ import { SPENTA_CONTACT_EMAIL } from '../../data/spentaManifest';
 import { useTheme } from '../../context/ThemeContext';
 import { useStack } from '../../store/StackContext';
 import { SpentaLogo } from '../../components/SpentaLogo';
+import { SystemHealthFooter } from '../../components/SystemHealthFooter';
 import {
   SsotBriefingProvider,
   useSsotBriefing,
@@ -115,6 +116,7 @@ function SsotBriefingWorkspace() {
     investorCalculatorState,
     exitInvestorBriefing,
     openContactModal,
+    onProfilerRender,
   } = useStack();
   const {
     activeSectionId,
@@ -150,14 +152,17 @@ function SsotBriefingWorkspace() {
     <div className="spenta-ssot-scope min-h-screen flex flex-col overflow-x-hidden print:bg-white print:text-slate-900 print:overflow-visible">
       <GlobalLoadingScreen />
       <ScrollProgressBar />
-      <SsotNavbar />
+      <React.Profiler id="SsotNavbar" onRender={onProfilerRender}>
+        <SsotNavbar />
+      </React.Profiler>
       <StickyBreadcrumbBar />
 
-      <main
-        id="ssot-main-content"
-        style={{ filter: sentimentFilterCss }}
-        className="ssot-main-content flex-1 max-w-[1440px] w-full mx-auto px-3.5 sm:px-6 py-5 sm:py-7 space-y-6 print:max-w-none print:p-0"
-      >
+      <React.Profiler id="SpentaSsotPage" onRender={onProfilerRender}>
+        <main
+          id="ssot-main-content"
+          style={{ filter: sentimentFilterCss }}
+          className="ssot-main-content flex-1 max-w-[1440px] w-full mx-auto px-3.5 sm:px-6 py-5 sm:py-7 space-y-6 print:max-w-none print:p-0"
+        >
         {/* Top Inline Breadcrumb & Active Track Summary */}
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200 dark:border-slate-800 text-xs ssot-no-print">
           <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1.5 font-mono">
@@ -259,7 +264,8 @@ function SsotBriefingWorkspace() {
         {/* 11. Seed Round SAFE Terms & Capital Allocation */}
         <SectionDivider accent="emerald" label="11 · Seed SAFE Terms" />
         <SafeTermsSection />
-      </main>
+        </main>
+      </React.Profiler>
 
       <footer
         id="ssot-main-footer"
@@ -328,6 +334,8 @@ function SsotBriefingWorkspace() {
               </div>
             </div>
           </div>
+
+          <SystemHealthFooter />
         </div>
       </footer>
 
