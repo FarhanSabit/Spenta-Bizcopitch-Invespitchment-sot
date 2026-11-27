@@ -51,6 +51,14 @@ export function SsotNavbar() {
 
   const [toolsOpen, setToolsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+
+  React.useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   const handleReturnToMainApp = () => {
     setMobileMenuOpen(false);
@@ -59,7 +67,13 @@ export function SsotNavbar() {
   };
 
   return (
-    <header className="sticky top-0 z-40 h-14 bg-[#FAF8F4]/95 dark:bg-[#0B1020]/95 backdrop-blur-md border-b border-[#E4DFD6] dark:border-[#232B4A] ssot-no-print">
+    <header
+      className={`sticky top-0 z-40 h-14 transition-all duration-200 border-b ssot-no-print ${
+        scrolled
+          ? 'bg-white/95 dark:bg-[#05070B]/95 backdrop-blur-xl border-slate-200 dark:border-slate-800 shadow-sm'
+          : 'bg-[#F8FAFC]/90 dark:bg-[#05070B]/88 backdrop-blur-md border-slate-200/70 dark:border-slate-800/70'
+      }`}
+    >
       <div className="max-w-[1520px] mx-auto px-3 sm:px-5 h-full flex items-center justify-between gap-2">
         {/* Left: Back to Main App CTA + Brand */}
         <div className="flex items-center gap-2.5 min-w-0">

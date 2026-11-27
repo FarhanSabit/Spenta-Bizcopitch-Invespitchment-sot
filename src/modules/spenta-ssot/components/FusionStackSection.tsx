@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   Activity,
   Check,
+  ChevronDown,
   Code2,
   Copy,
   Layers,
@@ -18,10 +20,19 @@ import {
 import { CoreLayerId, useStack } from '../../../store/StackContext';
 import { copyTextWithFallback } from '../../../utils/shareUrlCodec';
 import { useSsotBriefing } from '../context/SsotBriefingContext';
+import { INSTITUTIONAL_EASE } from './SectionReveal';
 
 const LAYER_KEYS: CoreLayerId[] = ['L6', 'L5', 'L4', 'L3', 'L2', 'L1'];
 
 type InspectorTabId = 'api' | 'sdk' | 'telemetry' | 'compliance';
+
+const METHOD_BADGE_MAP: Record<string, string> = {
+  POST: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-500/35',
+  GET: 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-500/35',
+  WS: 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-500/35',
+  gRPC: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-500/35',
+  MQTT: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-500/35',
+};
 
 const TELEMETRY_BY_LAYER: Record<
   CoreLayerId,
@@ -43,7 +54,7 @@ const TELEMETRY_BY_LAYER: Record<
     { label: 'WebAR Bundle Payload', value: '14.2 MB', status: 'Optimal' },
     { label: 'Cleanroom Twin Frame Rate', value: '72–90 FPS', status: 'Nominal' },
     { label: 'Spatial Anchor Drift', value: '< 1.8 mm', status: 'Calibrated' },
-    { label: 'Telemetry Telemetry Stream', value: 'gRPC / WebRTC', status: 'Active' },
+    { label: 'Telemetry Sync Stream', value: 'gRPC / WebRTC', status: 'Active' },
   ],
   L3: [
     { label: 'PrimeOCR Throughput', value: '2.1s / form', status: 'Production' },
@@ -78,9 +89,11 @@ export function FusionStackSection() {
     activeLayer,
     setActiveLayer,
     pulsedSectionId,
+    highlightedSectionId,
   } = useSsotBriefing();
 
   const [inspectorTab, setInspectorTab] = useState<InspectorTabId>('api');
+  const [expandedDocsLayer, setExpandedDocsLayer] = useState<CoreLayerId | null>('L6');
   const [copiedCode, setCopiedCode] = useState(false);
 
   const chapter = BRIEFING_CHAPTERS[1];
@@ -97,31 +110,47 @@ export function FusionStackSection() {
     window.setTimeout(() => setCopiedCode(false), 2000);
   };
 
+  const isHighlighted = highlightedSectionId === 'ssot-fusion-stack';
+
   return (
     <section
       id="ssot-fusion-stack"
-      className={`scroll-mt-24 space-y-5 rounded-2xl p-1 transition-all ${
+      className={`scroll-mt-24 relative overflow-hidden space-y-5 rounded-2xl p-5 sm:p-7 ssot-band-primary border border-slate-200 dark:border-slate-800/80 transition-all ${
         pulsedSectionId === 'ssot-fusion-stack' ? 'animate-section-header-pulse' : ''
+      } ${
+        isHighlighted
+          ? 'ring-2 ring-cyan-500 dark:ring-cyan-400 ring-offset-4 ring-offset-slate-50 dark:ring-offset-[#05070B]'
+          : ''
       }`}
     >
+      {/* Subtle Ambient Orbs */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none -left-24 -top-24 absolute w-[480px] h-[480px] rounded-full bg-cyan-500/8 blur-[140px]"
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none -right-24 -bottom-24 absolute w-[420px] h-[420px] rounded-full bg-indigo-500/8 blur-[130px]"
+      />
+
       {/* Chapter Header */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-3 pb-4 border-b border-[#E4DFD6] dark:border-[#232B4A]">
+      <div className="relative z-10 flex flex-col md:flex-row md:items-end justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800/80">
         <div className="space-y-1">
-          <div className="text-xs font-mono text-[#5F6576] dark:text-[#8E96B0]">
+          <div className="text-xs font-mono text-slate-500 dark:text-slate-400">
             <span>Chapter {chapter.num}</span>
             {chapter.recommendedFor.includes(personaTrack) && (
               <>
                 <span aria-hidden="true"> · </span>
-                <span className="text-[#1C6E46] dark:text-[#6FCB9F] font-semibold">
+                <span className="text-emerald-700 dark:text-emerald-400 font-semibold">
                   Priority for {activePersonaSpec.label}
                 </span>
               </>
             )}
           </div>
-          <h2 className="font-display-ssot text-xl sm:text-2xl font-bold text-[#16213A] dark:text-[#E7EBF5] tracking-tight text-balance">
+          <h2 className="font-display-ssot text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight text-balance">
             {chapter.title}
           </h2>
-          <p className="text-sm text-[#5F6576] dark:text-[#8E96B0] max-w-3xl">
+          <p className="text-sm text-slate-600 dark:text-slate-400 max-w-3xl">
             Vertically integrated L1–L6 sovereign pipeline. Switch between High-Level Overview and Technical Deep-Dive to inspect live APIs, SDKs, enclave telemetry, and compliance attestations.
           </p>
         </div>
@@ -131,28 +160,30 @@ export function FusionStackSection() {
           <div
             role="group"
             aria-label="Fusion Stack Detail Depth"
-            className="inline-flex rounded-lg bg-[#F2EFE9] dark:bg-[#0F1529] p-1 border border-[#E4DFD6] dark:border-[#232B4A]"
+            className="inline-flex rounded-lg bg-slate-100 dark:bg-slate-900 p-1 border border-slate-200 dark:border-slate-800"
           >
             <button
+              id="fusion-view-overview-btn"
               type="button"
               aria-pressed={fusionViewMode === 'overview'}
               onClick={() => setFusionViewMode('overview')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 fusionViewMode === 'overview'
-                  ? 'bg-white dark:bg-[#141A32] text-[#16213A] dark:text-[#E7EBF5] shadow-xs'
-                  : 'text-[#5F6576] dark:text-[#8E96B0]'
+                  ? 'bg-cyan-600 text-white dark:bg-cyan-500 dark:text-slate-950 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400'
               }`}
             >
               High-Level Overview
             </button>
             <button
+              id="fusion-view-deepdive-btn"
               type="button"
               aria-pressed={fusionViewMode === 'deep-dive'}
               onClick={() => setFusionViewMode('deep-dive')}
-              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 ${
                 fusionViewMode === 'deep-dive'
-                  ? 'bg-[#1F3863] text-white dark:bg-[#8FA6E8] dark:text-[#0B1020]'
-                  : 'text-[#5F6576] dark:text-[#8E96B0]'
+                  ? 'bg-indigo-600 text-white dark:bg-indigo-500 dark:text-white shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400'
               }`}
             >
               Technical Deep-Dive
@@ -162,7 +193,7 @@ export function FusionStackSection() {
           <button
             type="button"
             onClick={() => openIntelligenceModal(chapter.title)}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] hover:border-[#1F3863] text-xs font-medium text-[#16213A] dark:text-[#E7EBF5] cursor-pointer whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-cyan-500 text-xs font-medium text-slate-900 dark:text-slate-100 cursor-pointer whitespace-nowrap"
           >
             <MessageSquarePlus className="w-3.5 h-3.5" />
             <span>{noteCount > 0 ? `Notes (${noteCount})` : 'Add Note'}</span>
@@ -170,276 +201,379 @@ export function FusionStackSection() {
         </div>
       </div>
 
-      {/* Mode 1: High-Level Overview Grid */}
-      {fusionViewMode === 'overview' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {LAYER_KEYS.map((layerKey) => {
-            const spec = FUSION_LAYER_TECH_SPECS[layerKey];
-            const selected = activeLayer === layerKey;
-            return (
-              <div
-                key={layerKey}
-                className={`p-5 rounded-2xl border flex flex-col justify-between gap-4 transition-colors ${
-                  selected
-                    ? 'bg-white dark:bg-[#141A32] border-[#1F3863] dark:border-[#8FA6E8]'
-                    : 'bg-white dark:bg-[#141A32] border-[#E4DFD6] dark:border-[#232B4A]'
-                }`}
-              >
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="font-bold text-[#1F3863] dark:text-[#8FA6E8]">
-                      {spec.layerId}
-                    </span>
-                    <span className="text-[#1C6E46] dark:text-[#6FCB9F] font-semibold">
-                      {spec.specs.latency}
-                    </span>
-                  </div>
-                  <h3 className="text-base font-bold text-[#16213A] dark:text-[#E7EBF5]">
-                    {spec.title}
-                  </h3>
-                  <p className="text-xs text-[#5F6576] dark:text-[#8E96B0] leading-relaxed">
-                    {spec.subtitle}
-                  </p>
-                </div>
-
-                <div className="pt-3 border-t border-[#E4DFD6] dark:border-[#232B4A] flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-mono text-[#5F6576] dark:text-[#8E96B0]">
-                    {spec.specs.protocol} · SLA {spec.specs.uptimeSla}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActiveLayer(layerKey);
-                      setFusionViewMode('deep-dive');
-                    }}
-                    className="text-xs font-semibold text-[#1F3863] dark:text-[#8FA6E8] hover:underline cursor-pointer whitespace-nowrap"
-                  >
-                    Inspect Specs →
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        /* Mode 2: Technical Deep-Dive with 4-Tab Live Inspector */
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Layer Selector Rail */}
-          <div className="lg:col-span-4 space-y-2">
-            {LAYER_KEYS.map((layerKey) => {
-              const spec = FUSION_LAYER_TECH_SPECS[layerKey];
-              const selected = activeLayer === layerKey;
-              return (
-                <button
-                  key={layerKey}
-                  type="button"
-                  onClick={() => setActiveLayer(layerKey)}
-                  className={`w-full text-left p-3.5 rounded-xl border transition-colors cursor-pointer ${
-                    selected
-                      ? 'bg-[#1F3863] text-white border-[#1F3863] dark:bg-[#8FA6E8] dark:text-[#0B1020] dark:border-[#8FA6E8]'
-                      : 'bg-white dark:bg-[#141A32] border-[#E4DFD6] dark:border-[#232B4A] hover:border-[#1F3863]/50 dark:hover:border-[#8FA6E8]/50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="font-bold">{spec.layerId}</span>
-                    <span className="opacity-85">{spec.specs.latency}</span>
-                  </div>
-                  <div className="text-sm font-semibold mt-1">{spec.title}</div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* 4-Tab Live API/SDK/Telemetry/Compliance Inspector */}
-          <div className="lg:col-span-8 p-5 rounded-2xl bg-white dark:bg-[#141A32] border border-[#E4DFD6] dark:border-[#232B4A] space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-              <div className="space-y-1">
-                <div className="text-xs font-mono text-[#5F6576] dark:text-[#8E96B0]">
-                  {activeFusionSpec.layerId} · {activeFusionSpec.specs.protocol} · SLA{' '}
-                  {activeFusionSpec.specs.uptimeSla}
-                </div>
-                <h3 className="text-lg font-bold text-[#16213A] dark:text-[#E7EBF5]">
-                  {activeFusionSpec.title}
-                </h3>
-                <p className="text-xs sm:text-sm text-[#5F6576] dark:text-[#8E96B0]">
-                  {activeFusionSpec.subtitle}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  navigateToItem('Spenta Core', { type: 'layer', id: activeLayer })
-                }
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#1F3863] hover:bg-[#162848] dark:bg-[#8FA6E8] dark:hover:bg-[#A6B9F0] text-white dark:text-[#0B1020] text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <SlidersHorizontal className="w-3.5 h-3.5" />
-                <span>Configure {activeLayer} in Spenta Core</span>
-              </button>
-            </div>
-
-            {/* 4-Tab Bar */}
-            <div
-              role="tablist"
-              aria-label="Layer Technical Inspector"
-              className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-[#F2EFE9] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A]"
-            >
-              {(
-                [
-                  { id: 'api', label: 'API Contracts', icon: Network },
-                  { id: 'sdk', label: 'SDK Code', icon: Code2 },
-                  { id: 'telemetry', label: 'Live Telemetry', icon: Activity },
-                  { id: 'compliance', label: 'Compliance', icon: ShieldCheck },
-                ] as const
-              ).map((tab) => {
-                const Icon = tab.icon;
-                const active = inspectorTab === tab.id;
+      {/* Mode 1 vs Mode 2 with AnimatePresence */}
+      <AnimatePresence mode="wait">
+        {fusionViewMode === 'overview' ? (
+          <motion.div
+            key="overview"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25, ease: INSTITUTIONAL_EASE }}
+            className="relative z-10 space-y-4"
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {LAYER_KEYS.map((layerKey) => {
+                const spec = FUSION_LAYER_TECH_SPECS[layerKey];
+                const selected = activeLayer === layerKey;
                 return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setInspectorTab(tab.id)}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap ${
-                      active
-                        ? 'bg-white dark:bg-[#141A32] text-[#16213A] dark:text-[#E7EBF5] shadow-xs'
-                        : 'text-[#5F6576] dark:text-[#8E96B0] hover:text-[#16213A] dark:hover:text-[#E7EBF5]'
+                  <div
+                    key={layerKey}
+                    className={`service-card-3d p-5 rounded-2xl border flex flex-col justify-between gap-4 transition-colors ${
+                      selected
+                        ? 'bg-cyan-50/50 dark:bg-slate-900/90 border-cyan-500'
+                        : 'bg-white dark:bg-slate-950/90 border-slate-200 dark:border-slate-800/80'
                     }`}
                   >
-                    <Icon className="w-3.5 h-3.5" />
-                    <span>{tab.label}</span>
-                  </button>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-mono">
+                        <span className="font-bold text-cyan-700 dark:text-cyan-400">
+                          {spec.layerId}
+                        </span>
+                        <span className="text-emerald-700 dark:text-emerald-400 font-semibold tabular-nums">
+                          {spec.specs.latency}
+                        </span>
+                      </div>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        {spec.title}
+                      </h3>
+                      <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                        {spec.subtitle}
+                      </p>
+                      <div className="p-2.5 rounded-lg bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-700 dark:text-slate-300 leading-relaxed">
+                        <strong className="font-mono text-indigo-700 dark:text-indigo-400">
+                          Value Impact:
+                        </strong>{' '}
+                        {spec.enterpriseImpact}
+                      </div>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                      <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                        {spec.specs.protocol} · SLA {spec.specs.uptimeSla}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActiveLayer(layerKey);
+                          setExpandedDocsLayer(layerKey);
+                          setFusionViewMode('deep-dive');
+                        }}
+                        className="text-xs font-semibold text-cyan-700 dark:text-cyan-400 hover:underline cursor-pointer whitespace-nowrap"
+                      >
+                        Deep-Dive →
+                      </button>
+                    </div>
+                  </div>
                 );
               })}
             </div>
 
-            {/* Tab 1: API Contracts */}
-            {inspectorTab === 'api' && (
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                  <div className="p-3 rounded-lg bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A]">
-                    <div className="text-[#5F6576] dark:text-[#8E96B0]">Latency</div>
-                    <div className="font-mono font-semibold text-[#16213A] dark:text-[#E7EBF5] mt-0.5">
-                      {activeFusionSpec.specs.latency}
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-lg bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A]">
-                    <div className="text-[#5F6576] dark:text-[#8E96B0]">Throughput</div>
-                    <div className="font-mono font-semibold text-[#16213A] dark:text-[#E7EBF5] mt-0.5">
-                      {activeFusionSpec.specs.throughput}
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-lg bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A]">
-                    <div className="text-[#5F6576] dark:text-[#8E96B0]">Encryption</div>
-                    <div className="font-mono font-semibold text-[#16213A] dark:text-[#E7EBF5] mt-0.5">
-                      {activeFusionSpec.specs.encryption}
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-lg bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A]">
-                    <div className="text-[#5F6576] dark:text-[#8E96B0]">Uptime SLA</div>
-                    <div className="font-mono font-semibold text-[#1C6E46] dark:text-[#6FCB9F] mt-0.5">
-                      {activeFusionSpec.specs.uptimeSla}
-                    </div>
-                  </div>
-                </div>
-
-                {activeFusionSpec.endpoints.map((ep) => (
+            <div className="flex justify-center pt-1">
+              <button
+                type="button"
+                onClick={() => setFusionViewMode('deep-dive')}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold cursor-pointer transition-colors"
+              >
+                <Code2 className="w-3.5 h-3.5" />
+                <span>Expand Technical Deep-Dive &amp; API Contracts</span>
+              </button>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="deep-dive"
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.25, ease: INSTITUTIONAL_EASE }}
+            className="relative z-10 grid grid-cols-1 lg:grid-cols-12 gap-5"
+          >
+            {/* Layer Selector Rail with Expandable techDocs Accordion */}
+            <div className="lg:col-span-5 space-y-2.5">
+              {LAYER_KEYS.map((layerKey) => {
+                const spec = FUSION_LAYER_TECH_SPECS[layerKey];
+                const selected = activeLayer === layerKey;
+                const docsExpanded = expandedDocsLayer === layerKey;
+                return (
                   <div
-                    key={ep.path}
-                    className="p-3 rounded-lg bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A] space-y-1"
+                    key={layerKey}
+                    className={`rounded-xl border transition-colors overflow-hidden ${
+                      selected
+                        ? 'bg-indigo-50/60 dark:bg-slate-900 border-indigo-500 dark:border-indigo-400'
+                        : 'bg-white dark:bg-slate-950/90 border-slate-200 dark:border-slate-800'
+                    }`}
                   >
-                    <div className="text-xs font-mono text-[#1F3863] dark:text-[#8FA6E8] font-semibold">
-                      {ep.method} {ep.path}
-                    </div>
-                    <p className="text-xs text-[#5F6576] dark:text-[#8E96B0]">{ep.description}</p>
-                    <pre className="text-[11px] font-mono text-[#16213A] dark:text-[#C8D0E4] overflow-x-auto pt-1">
-                      {ep.samplePayload}
-                    </pre>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Tab 2: SDK Code */}
-            {inspectorTab === 'sdk' && (
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5]">
-                    {activeFusionSpec.codeSample.title} ({activeFusionSpec.codeSample.language})
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void handleCopySnippet()}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-[#1F3863] dark:text-[#8FA6E8] hover:underline cursor-pointer"
-                  >
-                    {copiedCode ? (
-                      <Check className="w-3.5 h-3.5 text-[#1C6E46]" />
-                    ) : (
-                      <Copy className="w-3.5 h-3.5" />
-                    )}
-                    <span>{copiedCode ? 'Copied' : 'Copy Code'}</span>
-                  </button>
-                </div>
-                <pre className="p-4 rounded-xl bg-[#0B1020] text-[#E7EBF5] text-xs font-mono overflow-x-auto leading-relaxed">
-                  {activeFusionSpec.codeSample.code}
-                </pre>
-              </div>
-            )}
-
-            {/* Tab 3: Live Telemetry */}
-            {inspectorTab === 'telemetry' && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {TELEMETRY_BY_LAYER[activeLayer].map((metric) => (
-                  <div
-                    key={metric.label}
-                    className="p-4 rounded-xl bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A] flex items-center justify-between gap-3"
-                  >
-                    <div>
-                      <div className="text-xs text-[#5F6576] dark:text-[#8E96B0]">
-                        {metric.label}
-                      </div>
-                      <div className="text-lg font-bold font-mono tabular-nums text-[#16213A] dark:text-[#E7EBF5] mt-0.5">
-                        {metric.value}
-                      </div>
-                    </div>
-                    <span className="text-xs font-mono font-semibold text-[#1C6E46] dark:text-[#6FCB9F]">
-                      {metric.status}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Tab 4: Compliance */}
-            {inspectorTab === 'compliance' && (
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {activeFusionSpec.complianceMapping.map((item) => (
-                    <div
-                      key={item}
-                      className="p-3.5 rounded-xl bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A] flex items-center gap-2.5"
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveLayer(layerKey);
+                        setExpandedDocsLayer((prev) => (prev === layerKey ? null : layerKey));
+                      }}
+                      className="w-full text-left p-3.5 cursor-pointer flex items-start justify-between gap-2"
                     >
-                      <ShieldCheck className="w-4 h-4 text-[#1C6E46] dark:text-[#6FCB9F] shrink-0" />
-                      <span className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5]">
-                        {item}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 text-xs font-mono">
+                          <span className="font-bold text-indigo-700 dark:text-indigo-400">
+                            {spec.layerId}
+                          </span>
+                          <span className="text-slate-400">·</span>
+                          <span className="text-emerald-700 dark:text-emerald-400 tabular-nums">
+                            {spec.specs.latency}
+                          </span>
+                        </div>
+                        <div className="text-sm font-semibold text-slate-900 dark:text-white mt-0.5">
+                          {spec.title}
+                        </div>
+                      </div>
+                      <ChevronDown
+                        className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${
+                          docsExpanded ? 'rotate-180 text-indigo-600 dark:text-indigo-400' : ''
+                        }`}
+                      />
+                    </button>
+
+                    <AnimatePresence initial={false}>
+                      {docsExpanded && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22, ease: INSTITUTIONAL_EASE }}
+                          className="overflow-hidden border-t border-slate-200 dark:border-slate-800/80"
+                        >
+                          <div className="p-3.5 bg-slate-50/80 dark:bg-slate-950/60 space-y-2 text-xs">
+                            <div>
+                              <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                                Touchpoints:
+                              </span>{' '}
+                              <span className="text-slate-600 dark:text-slate-400">
+                                {spec.touchpoints}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="font-mono font-semibold text-slate-700 dark:text-slate-300">
+                                Governance:
+                              </span>{' '}
+                              <span className="text-slate-600 dark:text-slate-400">
+                                {spec.securityGovernance}
+                              </span>
+                            </div>
+                            <div className="font-mono text-[11px] text-cyan-700 dark:text-cyan-400">
+                              Stack: {spec.techStack.join(' · ')}
+                            </div>
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 4-Tab Live API/SDK/Telemetry/Compliance Inspector */}
+            <div className="lg:col-span-7 p-5 rounded-2xl bg-white dark:bg-slate-950/90 border border-slate-200 dark:border-slate-800 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <div className="text-xs font-mono text-slate-500 dark:text-slate-400">
+                    {activeFusionSpec.layerId} · {activeFusionSpec.specs.protocol} · SLA{' '}
+                    {activeFusionSpec.specs.uptimeSla}
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                    {activeFusionSpec.title}
+                  </h3>
+                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-400">
+                    {activeFusionSpec.subtitle}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    navigateToItem('Spenta Core', { type: 'layer', id: activeLayer })
+                  }
+                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold cursor-pointer whitespace-nowrap shrink-0"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                  <span>Configure {activeLayer}</span>
+                </button>
+              </div>
+
+              {/* 4-Tab Bar */}
+              <div
+                role="tablist"
+                aria-label="Layer Technical Inspector"
+                className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800"
+              >
+                {(
+                  [
+                    { id: 'api', label: 'API Contracts', icon: Network },
+                    { id: 'sdk', label: 'SDK Code', icon: Code2 },
+                    { id: 'telemetry', label: 'Live Telemetry', icon: Activity },
+                    { id: 'compliance', label: 'Compliance', icon: ShieldCheck },
+                  ] as const
+                ).map((tab) => {
+                  const Icon = tab.icon;
+                  const active = inspectorTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setInspectorTab(tab.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                        active
+                          ? 'bg-white dark:bg-slate-950 text-slate-900 dark:text-white shadow-xs'
+                          : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                      }`}
+                    >
+                      <Icon className="w-3.5 h-3.5" />
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Tab 1: API Contracts with Method Badges */}
+              {inspectorTab === 'api' && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800">
+                      <div className="text-slate-500 dark:text-slate-400">Latency</div>
+                      <div className="font-mono font-semibold tabular-nums text-slate-900 dark:text-white mt-0.5">
+                        {activeFusionSpec.specs.latency}
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800">
+                      <div className="text-slate-500 dark:text-slate-400">Throughput</div>
+                      <div className="font-mono font-semibold tabular-nums text-slate-900 dark:text-white mt-0.5">
+                        {activeFusionSpec.specs.throughput}
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800">
+                      <div className="text-slate-500 dark:text-slate-400">Encryption</div>
+                      <div className="font-mono font-semibold text-slate-900 dark:text-white mt-0.5">
+                        {activeFusionSpec.specs.encryption}
+                      </div>
+                    </div>
+                    <div className="p-3 rounded-lg bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800">
+                      <div className="text-slate-500 dark:text-slate-400">Uptime SLA</div>
+                      <div className="font-mono font-semibold tabular-nums text-emerald-700 dark:text-emerald-400 mt-0.5">
+                        {activeFusionSpec.specs.uptimeSla}
+                      </div>
+                    </div>
+                  </div>
+
+                  {activeFusionSpec.endpoints.map((ep) => {
+                    const badgeCls =
+                      METHOD_BADGE_MAP[ep.method] ??
+                      'bg-slate-100 dark:bg-slate-900 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700';
+                    return (
+                      <div
+                        key={ep.path}
+                        className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 space-y-1.5"
+                      >
+                        <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                          <span
+                            className={`px-2 py-0.5 rounded border text-[10px] font-bold ${badgeCls}`}
+                          >
+                            {ep.method}
+                          </span>
+                          <span className="font-semibold text-slate-900 dark:text-slate-100 break-all">
+                            {ep.path}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 dark:text-slate-400">{ep.description}</p>
+                        <pre className="text-[11px] font-mono text-slate-800 dark:text-slate-300 overflow-x-auto pt-1">
+                          {ep.samplePayload}
+                        </pre>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Tab 2: SDK Code */}
+              {inspectorTab === 'sdk' && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-slate-900 dark:text-white">
+                      {activeFusionSpec.codeSample.title} ({activeFusionSpec.codeSample.language})
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopySnippet()}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-cyan-700 dark:text-cyan-400 hover:underline cursor-pointer"
+                    >
+                      {copiedCode ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                      ) : (
+                        <Copy className="w-3.5 h-3.5" />
+                      )}
+                      <span>{copiedCode ? 'Copied' : 'Copy Code'}</span>
+                    </button>
+                  </div>
+                  <pre className="p-4 rounded-xl bg-[#05070B] text-slate-100 border border-slate-800 text-xs font-mono overflow-x-auto leading-relaxed">
+                    {activeFusionSpec.codeSample.code}
+                  </pre>
+                </div>
+              )}
+
+              {/* Tab 3: Live Telemetry */}
+              {inspectorTab === 'telemetry' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {TELEMETRY_BY_LAYER[activeLayer].map((metric) => (
+                    <div
+                      key={metric.label}
+                      className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-3"
+                    >
+                      <div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400">
+                          {metric.label}
+                        </div>
+                        <div className="text-lg font-bold font-mono tabular-nums text-slate-900 dark:text-white mt-0.5">
+                          {metric.value}
+                        </div>
+                      </div>
+                      <span className="text-xs font-mono font-semibold text-emerald-700 dark:text-emerald-400">
+                        {metric.status}
                       </span>
                     </div>
                   ))}
                 </div>
-                <div className="p-3.5 rounded-xl bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A] flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="font-mono text-[#5F6576] dark:text-[#8E96B0]">
-                    Stack Components: {activeFusionSpec.techStack.join(' · ')}
-                  </span>
-                  <span className="inline-flex items-center gap-1 text-[#1F3863] dark:text-[#8FA6E8] font-semibold">
-                    <Layers className="w-3.5 h-3.5" />
-                    Zero Cloud PII Exfiltration
-                  </span>
+              )}
+
+              {/* Tab 4: Compliance */}
+              {inspectorTab === 'compliance' && (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {activeFusionSpec.complianceMapping.map((item) => (
+                      <div
+                        key={item}
+                        className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 flex items-center gap-2.5"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <span className="text-xs font-semibold text-slate-900 dark:text-white">
+                          {item}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span className="font-mono text-slate-600 dark:text-slate-400">
+                      Stack Components: {activeFusionSpec.techStack.join(' · ')}
+                    </span>
+                    <span className="inline-flex items-center gap-1 text-cyan-700 dark:text-cyan-400 font-semibold">
+                      <Layers className="w-3.5 h-3.5" />
+                      Zero Cloud PII Exfiltration
+                    </span>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 }

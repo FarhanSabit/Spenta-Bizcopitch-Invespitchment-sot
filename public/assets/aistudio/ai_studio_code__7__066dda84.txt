@@ -1,0 +1,275 @@
+# SPENTA — Intelligent Reality | Investor Master SSOT
+## Granular Visual Design, Dark/Light Theme Parity, Animation & Section-by-Section Architecture (`design.md`)
+
+> **Purpose**: Exact, implementation-grade design and motion specification extracted from the **Spenta Intelligent Reality Investor Master SSOT** codebase, tailored to replicate its dark obsidian visual language, typography, color hierarchy, interactive mechanics, and **dual Light/Dark mode animation system** inside **"Remix Spentech Pitching WebApp"**.
+
+---
+
+## 1. Visual Philosophy & Atmospheric Layering
+
+The aesthetic is **Institutional Aerospace Telemetry meets Venture Capital Diligence**: a razor-sharp, high-density obsidian interface (`#05070B`) punctuated by controlled bioluminescent accents (Cyan, Emerald, Indigo, Purple), micro-grid textures, precision corner reticles (`.hud-corner`), tabular monospace metrics, and calm, physics-calibrated motion (`cubic-bezier(0.16, 1, 0.3, 1)`).
+
+### 1.1 Alternating Surface Elevation Stack (Dark Mode)
+Sections alternate deliberately between two ultra-deep obsidian values (`#05070B` and `#070A10` / `#0A0F16`) separated by hairline `slate-800/80` borders and animated `SectionDivider` beams so vertical scrolling feels rhythmically structured without heavy card walls:
+
+| Layer Level | Hex / Tailwind Token | Usage |
+| :--- | :--- | :--- |
+| **L0: Abyssal Base** | `#020617` (`body`), `#030407` (`#main-footer`), `#030508` (`GlobalLoadingScreen`) | Page canvas, footer foundation, boot splash |
+| **L1: Primary Obsidian** | `#05070B` | Root `<div id="app-root">`, `#hero`, `#fusion-stack`, `#rd-roadmap`, `#value-exchange`, `#case-studies`, `#executive-team`, `#passive-ip`, `#investment-terms` |
+| **L2: Elevated Obsidian** | `#06090F` (`InvestorNewsTicker`), `#070A10`, `#0a0f16` (`MilestonesSection`) | Alternating sections (`#dual-engines`, `#market-shift`, `#unit-economics`, `#dual-shore-globe`, `#moat-benchmarks`), `BreadcrumbNav` (`#070A10/95`), sticky headers |
+| **L3: Glass Cards & Modals** | `bg-slate-950/85` – `bg-slate-950/95`, `#0B101B` | Primary cards, floating rails (`bg-slate-950/92 backdrop-blur-xl`), modal containers (`backdrop-blur-2xl`) |
+| **L4: Interactive Controls** | `bg-slate-900/60` – `bg-slate-900/95` | Nested metric tiles, tab bars, hover card elevation, active pill backgrounds |
+| **Hairline Borders** | `border-slate-800/80` (rest), `border-slate-700/80` (hover/elevated) | All structural dividers, card outlines, input frames |
+
+### 1.2 Light Mode ↔ Dark Mode Parity Matrix (For "Remix Spentech Pitching WebApp")
+When implementing both **Light Mode** and **Dark Mode** in **Remix Spentech Pitching WebApp**, use semantic CSS variables in `:root` (Light) and `.dark` (Dark) so every component and animation adapts cleanly without muddy shadows or unreadable white-on-white / dark-on-dark contrasts:
+
+| Semantic Token | Light Mode (`:root`) | Dark Mode (`.dark` / This App) |
+| :--- | :--- | :--- |
+| `--bg-canvas` | `#F8FAFC` (`slate-50`) | `#05070B` |
+| `--bg-band-alt` | `#F1F5F9` (`slate-100`) | `#070A10` |
+| `--bg-footer` | `#0F172A` or `#E2E8F0` | `#030407` |
+| `--bg-surface` | `rgba(255, 255, 255, 0.88)` | `rgba(2, 6, 23, 0.90)` (`slate-950/90`) |
+| `--bg-surface-elevated` | `#FFFFFF` | `rgba(15, 23, 42, 0.80)` (`slate-900/80`) |
+| `--border-hairline` | `rgba(148, 163, 184, 0.35)` (`slate-300/60`) | `rgba(30, 41, 59, 0.80)` (`slate-800/80`) |
+| `--grid-line` | `rgba(15, 23, 42, 0.05)` | `rgba(30, 41, 59, 0.25)` |
+| `--text-primary` | `#0F172A` (`slate-900`) | `#FFFFFF` / `#F1F5F9` (`slate-100`) |
+| `--text-secondary` | `#334155` (`slate-700`) | `#CBD5E1` (`slate-300`) |
+| `--text-muted` | `#64748B` (`slate-500`) | `#94A3B8` (`slate-400`) |
+| `--accent-cyan` | `#0891B2` (`cyan-600`) | `#22D3EE` (`cyan-400`) / `#06B6D4` (`cyan-500`) |
+| `--accent-emerald` | `#059669` (`emerald-600`) | `#34D399` (`emerald-400`) / `#10B981` |
+| `--accent-indigo` | `#4F46E5` (`indigo-600`) | `#818CF8` (`indigo-400`) / `#6366F1` |
+| `--accent-purple` | `#9333EA` (`purple-600`) | `#C084FC` (`purple-400`) / `#A855F7` |
+| `--accent-amber` | `#D97706` (`amber-600`) | `#F59E0B` (`amber-500`) |
+| `--accent-rose` | `#E11D48` (`rose-600`) | `#F43F5E` (`rose-500`) |
+| `--glow-cyan` | `rgba(8, 145, 178, 0.16)` | `rgba(34, 211, 238, 0.35)` |
+| `--orb-opacity` | `0.06` (pastel wash) | `0.10` (`bg-*-600/10`) |
+
+> **Dark Mode Implementation Nuances for "Remix Spentech Pitching WebApp"**:
+> 1. **Never rely on pure `#000000` or flat `#111827`**: Alternate `#05070B` and `#070A10` with `border-t border-b border-slate-800/80` and `10%`-opacity radial blur orbs (`blur-[120px]` to `blur-[180px]`).
+> 2. **Always invert pill badge opacities in dark mode**: Dark badges use `bg-{color}-950/60 border border-{color}-500/30 text-{color}-300` (whereas light mode uses `bg-{color}-50 border-{color}-200 text-{color}-700`).
+> 3. **D3 & Recharts SVG colors must read CSS variables or dark flags**: Axis strokes `#334155` (dark) / `#CBD5E1` (light); tick labels `#94A3B8` (dark) / `#475569` (light) in `10px` `JetBrains Mono`.
+> 4. **Interactive rings use offset matching the obsidian canvas**: `ring-2 ring-cyan-400 ring-offset-4 ring-offset-[#05070B]` (light mode uses `ring-offset-white` or `ring-offset-slate-50`).
+> 5. **Print Override (`@media print`)**: Always force `#ffffff` canvas, `#020617` headings, `#334155` body text, `filter: none !important`, disable `backdrop-filter` / animations / HUD brackets, and hide all `header, nav, aside, .fixed, .sticky, .floating-sidebar, .section-divider, #main-footer`.
+
+---
+
+## 2. Typography & Numeric Precision (`index.html` & `src/index.css`)
+
+### 2.1 Font Loading (`index.html`)
+```html
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+
+# SPENTA — Intelligent Reality | Investor Master SSOT
+## Granular Visual Design, Dark/Light Theme Parity, Animation & Section-by-Section Architecture (`design.md`)
+
+> **Purpose**: Exact, implementation-grade design and motion specification extracted from the **Spenta Intelligent Reality Investor Master SSOT** codebase, tailored to replicate its dark obsidian visual language, typography, color hierarchy, interactive mechanics, and **dual Light/Dark mode animation system** inside **"Remix Spentech Pitching WebApp"**.
+
+---
+
+## 1. Visual Philosophy & Atmospheric Layering
+
+The aesthetic is **Institutional Aerospace Telemetry meets Venture Capital Diligence**: a razor-sharp, high-density obsidian interface (`#05070B`) punctuated by controlled bioluminescent accents (Cyan, Emerald, Indigo, Purple), micro-grid textures, precision corner reticles (`.hud-corner`), tabular monospace metrics, and calm, physics-calibrated motion (`cubic-bezier(0.16, 1, 0.3, 1)`).
+
+### 1.1 Alternating Surface Elevation Stack (Dark Mode)
+Sections alternate deliberately between two ultra-deep obsidian values (`#05070B` and `#070A10` / `#0A0F16`) separated by hairline `slate-800/80` borders and animated `SectionDivider` beams so vertical scrolling feels rhythmically structured without heavy card walls:
+
+| Layer Level | Hex / Tailwind Token | Usage |
+| :--- | :--- | :--- |
+| **L0: Abyssal Base** | `#020617` (`body`), `#030407` (`#main-footer`), `#030508` (`GlobalLoadingScreen`) | Page canvas, footer foundation, boot splash |
+| **L1: Primary Obsidian** | `#05070B` | Root `<div id="app-root">`, `#hero`, `#fusion-stack`, `#rd-roadmap`, `#value-exchange`, `#case-studies`, `#executive-team`, `#passive-ip`, `#investment-terms` |
+| **L2: Elevated Obsidian** | `#06090F` (`InvestorNewsTicker`), `#070A10`, `#0a0f16` (`MilestonesSection`) | Alternating sections (`#dual-engines`, `#market-shift`, `#unit-economics`, `#dual-shore-globe`, `#moat-benchmarks`), `BreadcrumbNav` (`#070A10/95`), sticky headers |
+| **L3: Glass Cards & Modals** | `bg-slate-950/85` – `bg-slate-950/95`, `#0B101B` | Primary cards, floating rails (`bg-slate-950/92 backdrop-blur-xl`), modal containers (`backdrop-blur-2xl`) |
+| **L4: Interactive Controls** | `bg-slate-900/60` – `bg-slate-900/95` | Nested metric tiles, tab bars, hover card elevation, active pill backgrounds |
+| **Hairline Borders** | `border-slate-800/80` (rest), `border-slate-700/80` (hover/elevated) | All structural dividers, card outlines, input frames |
+
+### 1.2 Light Mode ↔ Dark Mode Parity Matrix (For "Remix Spentech Pitching WebApp")
+When implementing both **Light Mode** and **Dark Mode** in **Remix Spentech Pitching WebApp**, use semantic CSS variables in `:root` (Light) and `.dark` (Dark) so every component and animation adapts cleanly without muddy shadows or unreadable white-on-white / dark-on-dark contrasts:
+
+| Semantic Token | Light Mode (`:root`) | Dark Mode (`.dark` / This App) |
+| :--- | :--- | :--- |
+| `--bg-canvas` | `#F8FAFC` (`slate-50`) | `#05070B` |
+| `--bg-band-alt` | `#F1F5F9` (`slate-100`) | `#070A10` |
+| `--bg-footer` | `#0F172A` or `#E2E8F0` | `#030407` |
+| `--bg-surface` | `rgba(255, 255, 255, 0.88)` | `rgba(2, 6, 23, 0.90)` (`slate-950/90`) |
+| `--bg-surface-elevated` | `#FFFFFF` | `rgba(15, 23, 42, 0.80)` (`slate-900/80`) |
+| `--border-hairline` | `rgba(148, 163, 184, 0.35)` (`slate-300/60`) | `rgba(30, 41, 59, 0.80)` (`slate-800/80`) |
+| `--grid-line` | `rgba(15, 23, 42, 0.05)` | `rgba(30, 41, 59, 0.25)` |
+| `--text-primary` | `#0F172A` (`slate-900`) | `#FFFFFF` / `#F1F5F9` (`slate-100`) |
+| `--text-secondary` | `#334155` (`slate-700`) | `#CBD5E1` (`slate-300`) |
+| `--text-muted` | `#64748B` (`slate-500`) | `#94A3B8` (`slate-400`) |
+| `--accent-cyan` | `#0891B2` (`cyan-600`) | `#22D3EE` (`cyan-400`) / `#06B6D4` (`cyan-500`) |
+| `--accent-emerald` | `#059669` (`emerald-600`) | `#34D399` (`emerald-400`) / `#10B981` |
+| `--accent-indigo` | `#4F46E5` (`indigo-600`) | `#818CF8` (`indigo-400`) / `#6366F1` |
+| `--accent-purple` | `#9333EA` (`purple-600`) | `#C084FC` (`purple-400`) / `#A855F7` |
+| `--accent-amber` | `#D97706` (`amber-600`) | `#F59E0B` (`amber-500`) |
+| `--accent-rose` | `#E11D48` (`rose-600`) | `#F43F5E` (`rose-500`) |
+| `--glow-cyan` | `rgba(8, 145, 178, 0.16)` | `rgba(34, 211, 238, 0.35)` |
+| `--orb-opacity` | `0.06` (pastel wash) | `0.10` (`bg-*-600/10`) |
+
+> **Dark Mode Implementation Nuances for "Remix Spentech Pitching WebApp"**:
+> 1. **Never rely on pure `#000000` or flat `#111827`**: Alternate `#05070B` and `#070A10` with `border-t border-b border-slate-800/80` and `10%`-opacity radial blur orbs (`blur-[120px]` to `blur-[180px]`).
+> 2. **Always invert pill badge opacities in dark mode**: Dark badges use `bg-{color}-950/60 border border-{color}-500/30 text-{color}-300` (whereas light mode uses `bg-{color}-50 border-{color}-200 text-{color}-700`).
+> 3. **D3 & Recharts SVG colors must read CSS variables or dark flags**: Axis strokes `#334155` (dark) / `#CBD5E1` (light); tick labels `#94A3B8` (dark) / `#475569` (light) in `10px` `JetBrains Mono`.
+> 4. **Interactive rings use offset matching the obsidian canvas**: `ring-2 ring-cyan-400 ring-offset-4 ring-offset-[#05070B]` (light mode uses `ring-offset-white` or `ring-offset-slate-50`).
+> 5. **Print Override (`@media print`)**: Always force `#ffffff` canvas, `#020617` headings, `#334155` body text, `filter: none !important`, disable `backdrop-filter` / animations / HUD brackets, and hide all `header, nav, aside, .fixed, .sticky, .floating-sidebar, .section-divider, #main-footer`.
+
+---
+
+## 2. Typography & Numeric Precision (`index.html` & `src/index.css`)
+
+### 2.1 Font Loading (`index.html`)
+```html
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Outfit:wght@300;400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Syne:wght@600;700;800&display=swap" rel="stylesheet">
+2.2 CSS Font Variables & Tracking (src/index.css)
+--font-display: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif — letter-spacing: -0.03em (.font-display)
+--font-heading: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif — letter-spacing: -0.025em (h1, h2, h3, .font-heading)
+--font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif (body default)
+--font-mono: 'JetBrains Mono', 'Fira Code', monospace (.font-mono, code, pre)
+2.3 Typographic Scale & Discipline
+Hero H1: text-4xl sm:text-5xl lg:text-6xl font-extrabold tracking-tight font-display leading-[1.1] with gradient highlight spans (text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-sky-300 to-indigo-400).
+Section H2: text-3xl sm:text-4xl lg:text-5xl font-extrabold text-white font-display (or font-heading font-bold in MilestonesSection / ValueExchangeSection).
+Card H3: text-lg sm:text-xl font-bold font-heading (feature inspectors: text-xl sm:text-2xl font-black font-heading).
+Section Eyebrow Pill: text-xs font-mono (or text-[10px] font-mono font-bold uppercase tracking-wider).
+KPI Numerals: font-mono tabular-nums font-black tracking-tight (tabular-nums is mandatory on scroll percentage readouts, financial tables, D3 axes, and currency switches so numbers never jitter horizontally).
+Button Text Discipline: whitespace-nowrap shrink-0 on navbar/rail/action buttons to forbid multi-line wrapping inside pills.
+3. Core CSS Effects, Surfaces & Keyframe Animations (src/index.css)
+3.1 Structural Textures & HUD Overlays
+Blueprint Grid (.bg-grid-pattern):
+background-size: 40px 40px;
+Dark: linear-gradient(to right, rgba(30, 41, 59, 0.25) 1px, transparent 1px), linear-gradient(to bottom, rgba(30, 41, 59, 0.25) 1px, transparent 1px)
+Light adaptation: rgba(15, 23, 42, 0.05) lines on #F8FAFC.
+Radial Spotlight (.bg-radial-cyan):
+Dark: radial-gradient(circle at 50% 50%, rgba(34, 211, 238, 0.08), transparent 70%)
+Light adaptation: rgba(8, 145, 178, 0.06).
+HUD Corner Brackets (.hud-corner):
+::before: top-left -1px, 6px × 6px, border-top & border-left 1.5px solid rgba(34, 211, 238, 0.9) (light mode: rgba(8, 145, 178, 0.7)).
+::after: bottom-right -1px, 6px × 6px, border-bottom & border-right 1.5px solid rgba(34, 211, 238, 0.9).
+Tech Borders (.tech-border, .tech-border-cyan, .tech-border-emerald, .tech-border-purple):
+backdrop-filter: blur(8px);
+Base: rgba(15, 23, 42, 0.5) + 1px solid rgba(51, 65, 85, 0.6) (Light: rgba(255,255,255,0.75) + rgba(203,213,225,0.8)).
+Cyan/Emerald/Purple tinted dark surfaces (rgba(8,28,44,0.5), rgba(6,32,24,0.5), rgba(28,12,44,0.5)) with 0.35 alpha border.
+CRT Scanlines & Sweeping Beam (.crt-scanlines, .crt-beam):
+.crt-scanlines: background-size: 100% 3px, 6px 100% subtle horizontal dark scanlines + RGB subpixel tint (opacity-40, pointer-events-none). In Light mode, reduce opacity to 0.08–0.12 using soft slate lines (rgba(15,23,42,0.04)).
+.crt-beam: height: 20%, linear cyan sheen rgba(34, 211, 238, 0.08) (rgba(8, 145, 178, 0.06) in Light mode), animation: scanline-roll 6s linear infinite (translateY(-100%) → translateY(1000%)).
+3.2 Shared Animations Across Both Light & Dark Mode
+Every CSS and Framer Motion (motion/react) animation works identically across Light and Dark themes, with luminance-calibrated shadows/glows:
+Animation Name / Class	Mechanics & Timing	Dark Mode Visual	Light Mode Adaptation
+SectionReveal (SectionReveal.tsx)	INSTITUTIONAL_EASE = [0.16, 1, 0.3, 1]. Container y: 28 → 0, opacity: 0 → 1 (0.65s, delay: 0.04, staggerChildren: 0.09, delayChildren: 0.06). Child items y: 18 → 0 (0.5s). Viewport trigger: { once: true, amount: 0.04, margin: '-32px 0px' }. Hero uses immediate={true}.	Smooth crisp reveal over #05070B	Identical motion curve; zero opacity flash
+.service-card-3d	perspective: 1200px; transform-style: preserve-3d; transition: 0.4s cubic-bezier(0.16, 1, 0.3, 1). Hover: perspective(1000px) rotateX(2.8deg) rotateY(-3.2deg) translateY(-5px) scale(1.018). Masked gradient border (::before, padding: 1.5px, 135deg Cyan→Purple→Sky, mask-composite: exclude) fades opacity: 0 → 1.	Glow shadow: 0 20px 35px -10px rgba(34,211,238,0.22), 0 10px 30px -5px rgba(168,85,247,0.22) + drop-shadow(0 0 10px rgba(34,211,238,0.65))	Elevation shadow: 0 20px 35px -10px rgba(8,145,178,0.14), 0 10px 25px -5px rgba(15,23,42,0.08) + 135deg Cyan-600→Purple-600 crisp edge border
+.animate-value-pulse	3s cubic-bezier(0.4, 0, 0.6, 1) infinite: opacity 1 → 0.85, scale 1 → 1.02	drop-shadow(0 0 4px → 10px rgba(52,211,153,0.4→0.8))	drop-shadow(0 0 3px → 7px rgba(5,150,105,0.22→0.45))
+.animate-data-flow	stroke-dasharray: 6, 6; animation: data-flow-dash 12s linear infinite (stroke-dashoffset: 200 → 0)	Cyan/Indigo glowing SVG conduits	Cyan-600 / Indigo-600 crisp dashed paths
+.animate-node-glow	4s ease-in-out infinite border/inset glow alternation	Cyan rgba(34,211,238,0.2) ↔ Purple rgba(168,85,247,0.4)	Cyan-600/20 ↔ Purple-600/25 subtle ring
+.animate-divider-sweep	5.5s cubic-bezier(0.4, 0, 0.2, 1) infinite: translateX(-120%) → translateX(340%), opacity 0 → 0.9 → 0	w-1/3 bright beam across 1px gradient track	Soft saturated cyan/emerald/indigo beam (opacity: 0.65)
+.animate-divider-pulse	3.2s ease-in-out infinite: scale(0.92 → 1.38), opacity(0.45 → 0.95)	Concentric ring around 10px × 10px rotated diamond core with neon shadow-[0_0_14px_3px]	Crisp bordered ring with softer 0 0 10px 1px shadow
+.animate-section-header-pulse	1.1s cubic-bezier(0.22, 1, 0.36, 1) 1: scale(1 → 1.018 → 1.006 → 1) triggered on h1/h2 when right-rail scroll completes (scrollend + 140ms idle fallback)	drop-shadow(0 0 18px rgba(34,211,238,0.6))	drop-shadow(0 0 14px rgba(8,145,178,0.35))
+Investor Sentiment Filter	#main-content { transition: filter 0.6s cubic-bezier(0.16, 1, 0.3, 1); }	bullish: saturate(1.25) contrast(1.04), cautious: 1.0, neutral: saturate(0.88) contrast(1.02), defensive: saturate(0.92)	Same filter matrix applies cleanly to light theme charts/cards
+Reduced Motion Guard	@media (prefers-reduced-motion: reduce)	Disables .animate-section-header-pulse; respects OS reduced-motion setting across motion transitions	Same in Light Mode
+4. Persistent Chrome, Navigation & Floating HUD Layer
+GlobalLoadingScreen.tsx:
+Fullscreen fixed inset-0 z-[100] bg-[#030508] (Light: #F8FAFC) with centered 500px × 500px bg-cyan-600/10 blur-[140px] orb.
+Displays SpentaLogo (lg/xl), animated telemetry status check (Activity animate-spin), progress bar, and fades out (opacity: 1 → 0).
+ScrollProgressBar.tsx:
+Fixed top 2.5px (h-[2.5px]) z-[70] horizontal bar: bg-gradient-to-r from-cyan-500 via-sky-400 to-teal-300 tracking window.scrollY / totalScroll.
+Navbar.tsx (#main-navbar):
+fixed top-0 left-0 right-0 z-50 transition-all duration-300:
+At rest: bg-transparent py-3.5.
+Scrolled (> 20px): bg-[#05070B]/90 backdrop-blur-xl border-b border-slate-800/80 shadow-2xl shadow-black/50 py-2.5 (Light: bg-white/90 border-slate-200 shadow-slate-900/5).
+Container max-w-[1640px] mx-auto px-3 sm:px-5 lg:px-6:
+Left: SpentaLogo size="sm" + XR & AI micro-badge (xl+).
+Center (lg+): Single-line pill container bg-slate-900/60 p-1 rounded-lg border border-slate-800 backdrop-blur-md with 8 anchor links (text-[10.5px] xl:text-[11px] font-mono whitespace-nowrap shrink-0).
+Right: Progressive disclosure to prevent wrapping between 1024px–1679px:
+Investor / Partner segmented toggle (inline >= 1360px, inside Tools menu below).
+Download Briefing (PDF condensed label at 1024–1279px, full label xl+, shows localized spinner + disabled during isGeneratingPdf).
+12-Slide Deck (inline >= 1360px, inside Tools below).
+Leave Feedback, D3 Intel, Print, Share Briefing (inline >= 1680px, inside Tools dropdown #nav-tools-overflow-btn below 1680px).
+Primary CTA: Data Room (bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-mono font-bold).
+GlobalTableOfContents flyout trigger on far right.
+BreadcrumbNav.tsx (#breadcrumb-nav):
+AnimatePresence slide-down (initial={{ opacity: 0, y: -20 }}, animate={{ opacity: 1, y: 0 }}, duration: 0.2) appearing when scrollY > 80.
+fixed top-[60px] md:top-[72px] z-40 bg-[#070A10]/95 backdrop-blur-md border-b border-slate-800/80.
+Unified Right-Edge Rail (SectionNavigator.tsx, #section-navigator-rail):
+Visible hidden md:flex (>= 768px) with protected horizontal gutter padding in src/index.css (4rem at 768–1023px, 4.25rem at 1024–1279px, 4.5rem at 1280–1460px).
+Viewport-safe positioning: fixed right-[max(0.5rem,env(safe-area-inset-right))] lg:right-3 xl:right-4 2xl:right-5 top-[max(4.75rem,calc(env(safe-area-inset-top)+4.5rem))] bottom-[max(8.25rem,calc(env(safe-area-inset-bottom)+8.25rem))] xl:bottom-[max(5.5rem,calc(env(safe-area-inset-bottom)+5.5rem))] w-10 md:w-11 xl:w-12 2xl:w-[52px] z-[75].
+Inner glass pill (bg-slate-950/92 backdrop-blur-xl border border-slate-800/90 rounded-2xl max-h-full overflow-y-auto overscroll-contain) stacks:
+Tabular 0%–100% scroll progress readout (text-[9px] font-mono tabular-nums text-cyan-400).
+14 Section Progress Nodes: Uniform fixed dimensions (w-[22px] h-[22px] xl:w-6 xl:h-6 2xl:w-[26px] 2xl:h-[26px], zero scale shift so spacing stays locked during scroll) over a clamped vertical gradient spine (from-cyan-400 via-sky-500 to-teal-400). Active node uses bg-cyan-500/25 border-cyan-400 text-cyan-300 ring-2 ring-cyan-400/30 shadow-[0_0_10px_rgba(34,211,238,0.55)].
+Hover/Move triggers showCursorNodeTooltip (portaled to document.body, follows cursor, auto-dismisses after 2600ms).
+Click scrolls smoothly and calls triggerHeaderPulse (animate-section-header-pulse) on completion.
+Utility Icons (separated by w-6 h-px bg-slate-800): InvestorSentimentWidget (trigger pill + portaled w-80 HUD popover & hover tooltip), Briefing Track (amber), 12-Slide Pitch Deck (indigo), Data Room (emerald), Contact (cyan).
+Quick-Action Tools: D3 Intel, Print, Share, Feedback, Back to Top.
+Left-Edge & Corner Widgets:
+SectionMap.tsx: fixed bottom-20 right-4 xl:left-4 xl:right-auto xl:top-1/2 xl:-translate-y-1/2 xl:bottom-auto z-[68]. Collapsible dependency map with internal zoom bar (0.8x–1.3x), search, status filter, feedback heatmap mode, focus mode, and 3s cyan ring jump.
+ActiveTrackIndicator.tsx: fixed bottom-4 left-4 z-[60] (max-w-[calc(100vw-6rem)] sm:max-w-xs).
+AnomalyWatchToast.tsx: fixed bottom-16 left-4 z-[65].
+VoiceNavigator.tsx: fixed bottom-4 right-4 z-[70] (Web Speech API mic orb + transcript pill).
+5. Granular Section-by-Section Specification (All 14 Sections + Ticker + Footer)
+Every section container sits inside <main id="main-content"> wrapped in <SectionReveal delay={0.05} stagger={0.08}> (except Hero which renders immediately above the fold) and separated by <SectionDivider accent="..." label="..." sectionId="..." />.
+Section 01: HeroSection (#hero)
+Surface & Ambient Lights: pt-28 pb-20 bg-grid-pattern relative overflow-hidden. Two radial blur orbs: top-center 700×400 tri-gradient (from-cyan-600/15 via-indigo-600/15 to-purple-600/10 blur-[130px]) and top-right 300×300 emerald (bg-emerald-600/10 blur-[100px]).
+Top Dispatch Matrix: max-w-3xl p-3 rounded-2xl bg-slate-950/85 border border-cyan-500/30 backdrop-blur-xl hud-corner overlaid with .crt-scanlines (opacity-40) + .crt-beam.
+Contains 6 interactive jump tiles (grid-cols-1 sm:grid-cols-2 gap-2) with color-coded icons (emerald, cyan, purple, sky, amber, teal). Clicking flashes bg-cyan-500 text-slate-950 ring-2 ring-cyan-400 for 1.2s and highlights the target section for 3s.
+Action Pill Strip: SpentaLogo, ArPreviewButton (fusion-core), ShareBriefingButton, One-Click Summary button (#hero-one-click-summary-btn with localized Loader2 animate-spin + disabled={isGeneratingSummary} guard), ReadingTimeIndicator, QuickNoteTrigger.
+Headline & KPI Ribbon: Mode-adaptive H1 (Investor vs Partner) + animated .animate-value-pulse inline badges (450% ROI in emerald, 32.5%–45% Profit Margins in cyan). Below: 4-column .hud-corner KPI cards (bg-slate-900/60 border-slate-800 hovering cyan/emerald/sky/purple) + 6-Layer Telemetry Mini Strip (L1–L6 mini progress bars) + 4 CTA grid (grid-cols-1 sm:grid-cols-2 lg:grid-cols-4).
+Right Column (lg:col-span-5): Spatial3DCanvas (Three.js WebGL procedural holographic spatial crystal/grid with cyan floating badge SPENTA SPATIAL TWIN & PHYSICAL AI ENGINE + pulsing status dot).
+Bottom Sub-Table (ExecutiveSummaryTable): #hero-executive-summary-table with domain filter tabs (All, Delivery & Vector, AI & Spatial, Edge & Ingest), stack direction sort, and "Inspect" buttons dispatching spenta:select-fusion-layer.
+Ticker: InvestorNewsTicker (#investor-news-ticker)
+Surface & Motion: bg-[#06090F] border-y border-slate-800/80. Continuous CSS @keyframes marquee horizontal ticker (pauses cleanly on hover) + click-to-inspect dark modal (bg-[#0B101B] border-slate-700).
+Section 02: DualEngineSection (#dual-engines) — Divider: 01 // Dual-Engine Model (cyan)
+Surface & Glows: py-20 bg-[#070A10] border-t border-b border-slate-800/80. Left cyan orb (w-96 h-96 bg-cyan-500/10 blur-[120px]), right purple orb (bg-purple-500/10 blur-[130px]).
+Animations:
+SVG Synergy Flywheel lines with animated pulsing nodes (animate={{ opacity: [0.4, 1, 0.4], scale: [0.9, 1.2, 0.9] }}, duration: 2.2s, repeat: Infinity).
+Engine mode switch (#engine-tab-experience vs #engine-tab-operations) with AnimatePresence content swap (initial={{ opacity: 0, y: 12, scale: 0.99 }} → duration: 0.35s, [0.16, 1, 0.3, 1]).
+.service-card-3d tilt cards contrasting Engine 1 (Spatial XR) vs Engine 2 (Physical AI).
+Section 03: FusionStackSection (#fusion-stack) — Divider: 02 // 6-Layer Fusion Stack (indigo)
+Surface & Glows: py-20 bg-[#05070B]. Left cyan orb (500×500 blur-[140px]), bottom-right indigo orb (450×450 blur-[130px]).
+Expandable/Collapsible Depth Toggle:
+Segmented tab bar (High-Level Overview #fusion-view-overview-btn in cyan vs Technical Deep-Dive #fusion-view-deepdive-btn in indigo) with AnimatePresence mode="wait" (y: 12 → 0, 0.25s).
+Overview State: Clean 3-column (lg:grid-cols-3) 6-layer summary cards with per-layer accent colors, latency pills, Enterprise Value Impact callouts, and "Deep-Dive ↗" jump links + bottom "Expand Technical Deep-Dive" CTA.
+Deep-Dive State: 12-column split (lg:col-span-5 stack layers with expandable accordion techDocs drawers height: 0 → auto + lg:col-span-7 4-tab live API/SDK/Telemetry/Compliance inspector with method-colored badges POST emerald, GET cyan, WS purple, gRPC blue).
+Section 04: RdRoadmapSection (#rd-roadmap) — Divider: 03 // R&D Roadmap (purple)
+Surface & Glows: py-20 bg-[#05070B] border-t border-b border-slate-800/80 with 600×400 center-left cyan orb (blur-[160px]).
+Visuals & Animations: Filter tabs (ALL TRACKS, Spatial XR, Vision AI) in bg-slate-900 border-slate-800; interactive Gantt timeline bars with status badge colors (Completed emerald, In Production cyan, Active indigo, Horizon purple); detail panel transitions opacity: 0, y: 15 → 1, 0 (0.3s).
+Section 05: MilestonesSection (#milestones) — Divider: 04 // Execution Sprints (cyan)
+Surface: py-24 bg-[#0a0f16] border-t border-slate-800/50.
+Visuals & Animations: Staggered sprint cards (whileInView, delay: index * 0.1) with animated horizontal progress bars (initial={{ width: 0 }} → whileInView={{ width: '${progress}%' }}, duration: 1s, delay: 0.2s).
+Section 06: ValueExchangeSection (#value-exchange) — Divider: 05 // Value Exchange (emerald)
+Surface: py-24 bg-[#05070B] border-t border-slate-800/50.
+Visuals & Animations: Interactive D3.js Force-Directed Network Graph with glowing colored nodes, draggable physics simulation, and animated details inspector card (initial={{ opacity: 0, scale: 0.9 }} → scale: 1).
+Section 07: MarketShiftSection (#market-shift) — Divider: 06 // Macro Hardware Shift (cyan)
+Surface & Backdrop: py-20 bg-[#070A10] border-t border-b border-slate-800/80 with MarketPulseCanvas (animated HTML5 Canvas spectral wave rings) behind a purple eyebrow badge (bg-purple-950/60 border-purple-500/30 text-purple-300) + "Launch Catalyst Matrix" trigger opening MacroCatalystOverlay.
+Visuals: 4 staggered Big Tech hardware catalyst cards (delay: idx * 0.1, duration: 0.4s) + Recharts TAM trajectory chart with dark glass tooltip (bg-slate-950 border-slate-700 backdrop-blur-md).
+Section 08: CaseStudiesSection (#case-studies) — Divider: 07 // Verified Deployments (indigo)
+Surface & Glows: py-20 bg-[#05070B]. Right emerald orb (500×500 blur-[150px]), left cyan orb (450×450 blur-[130px]).
+Visuals & Animations: Emerald filter bar (bg-emerald-500 text-slate-950 font-bold), staggered deployment cards (delay: idx * 0.08, hover title group-hover:text-emerald-300), and interactive Enterprise ROI Calculator with live USD/BDT Recharts projections.
+Section 09: UnitEconomicsSection (#unit-economics) — Divider: 08 // Unit Economics (emerald)
+Surface & Glow: py-20 bg-[#070A10] border-t border-b border-slate-800/80 with center cyan orb (600×400 blur-[150px]).
+Modular Sub-Components & Motion:
+Top controls: Model A/B/C & 9-Tier selector (T1–T9), Scenario pills (Base, Aggressive, Conservative), Compare Scenarios toggle, Investment Risks Overlay toggle (InvestmentRisksOverlay.tsx — amber/rose bear-case sensitivity warning overlay), PDF/JSON/CSV export buttons (Loader2 spinner + disabled={isGeneratingReport}), and D3 Intel Dashboard launcher.
+FinancialSummaryGenerator: AI thesis card calling POST /api/financial-summary with RefreshCw animate-spin and disabled={isLoading}.
+RoiScenarioComparator, RoiSensitivityHeatmap, RoiSensitivitySlider (D3 5-Year ROI area chart updating smoothly on slider drag), and MonteCarloSimulation (D3 3,000-iteration histogram with shaded confidence region #06b6d4 opacity: 0.08, highlighted CI bars #38bdf8, mean dashed green #34d399, CI bounds rose #f43f5e).
+Recharts Cost & Margin Waterfall (slide-in x: -20 → 0 / x: 20 → 0) + Anomaly Watch Drawer (initial={{ x: '100%' }} → 0, type: 'spring', damping: 25, stiffness: 300).
+Section 10: DualShoreGlobeSection (#dual-shore-globe) — Divider: 09 // Dual-Shore Sync (cyan)
+Surface & Glow: py-20 bg-[#070A10] border-t border-b border-slate-800/80 with 700×500 center cyan orb (blur-[180px]).
+Visuals & Animations: Interactive Three.js 3D Holographic Earth Globe with glowing Bezier orbital data arcs (San Jose ↔ Dhaka ↔ Sydney), auto-rotate toggle (RotateCw animate-spin 8s), live timezone clocks, and 8:1 role arbitrage matrix.
+Section 11: ExecutiveTeamSection (#executive-team) — Divider: 10 // Executive Leadership (indigo)
+Surface & Glows: py-20 bg-[#05070B] border-t border-slate-800/80. Cyan (500×500) + Indigo (450×450) ambient orbs (blur-[150px]).
+Visuals & Animations: Leadership cards (whileInView, delay: idx * 0.1, hover group-hover:text-cyan-300), dual-shore location badges, and direct inquiry CTAs.
+Section 12: PassiveIPSection (#passive-ip) — Divider: 11 // Passive IP Streams (purple)
+Surface & Glow: py-20 bg-[#05070B] with bottom-right purple orb (500×400 bg-purple-600/10 blur-[150px]).
+Visuals & Animations: Staggered stream selector tabs (delay: idx * 0.08) + animated stream economics detail panel (0.3s).
+Section 13: MoatAndBenchmarksSection (#moat-benchmarks) — Divider: 12 // Competitive Moat (cyan)
+Surface: py-20 bg-[#070A10] border-t border-b border-slate-800/80.
+Visuals & Animations: Staggered M&A precedent benchmark cards (delay: idx * 0.08) + 4-way Competitive Moat Matrix table highlighting Spenta's column in glowing cyan/emerald contrast.
+Section 14: InvestmentTermsSection (#investment-terms) — Divider: 13 // Seed SAFE Terms (emerald)
+Surface & Glow: py-20 bg-[#05070B] with 600×500 cyan orb (blur-[160px]).
+Visuals & Animations: 4 sequential SAFE highlight tiles (delay: 0.05, 0.10, 0.15, 0.20), slide-in allocation list (x: -15 → 0, delay: idx * 0.08), Recharts Use-of-Funds Donut (x: 15 → 0), and primary SAFE commitment CTAs.
+Global Footer (#main-footer)
+Surface & Clearance: bg-[#030407] border-t border-slate-800/80 pt-16 pb-28 relative overflow-hidden (pb-28 protects bottom links and the TOP action button from floating corner trays).
+Contents: FeedbackWidget (topic selector + High Conviction / Request Data / Questions buttons with canvas-confetti burst), 3-column grid (max-w-7xl with responsive right-rail gutter protection), SpentaLogo, compliance badges, and institutional disclaimer bar.
+6. Checklist for Porting Dark Mode & Dual-Theme Animations to "Remix Spentech Pitching WebApp"
+Wrap Theme Tokens in CSS Custom Properties: Map all #05070B / #070A10 / slate-950 / slate-800 surfaces and light equivalents to semantic tokens so switching Light ↔ Dark updates cards, .bg-grid-pattern, .hud-corner, .crt-scanlines, .service-card-3d, and D3/Recharts axes automatically.
+Use INSTITUTIONAL_EASE = [0.16, 1, 0.3, 1] Everywhere: Keep Motion entrances understated (y: 18–28px, duration: 0.5–0.65s, viewport={{ once: true }}) so enterprise diligence feels authoritative rather than bouncy.
+Calibrate Glow Alpha by Mode: Keep neon drop-shadow / box-shadow glows at 0.35–0.65 alpha in Dark Mode and tone them down to 0.14–0.30 crisp elevation shadows in Light Mode.
+Enforce tabular-nums, whitespace-nowrap, & Disabled Loading States: Every numeric counter, KPI metric, and chart tooltip uses JetBrains Mono + tabular-nums; every async button (PDF, .PPTX, Summary, AI Thesis, Monte Carlo) displays a localized Loader2 animate-spin and sets disabled while running.
+Respect Accessibility & Print: Keep focus-visible:ring-2 focus-visible:ring-cyan-400, @media (prefers-reduced-motion: reduce), safe-area insets (env(safe-area-inset-*)) on fixed rails, and clean white-paper @media print overrides.

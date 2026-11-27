@@ -4,7 +4,9 @@ import {
   BRIEFING_CHAPTERS,
   INVESTOR_PERSONA_TRACKS,
 } from '../../../data/unifiedSsotData';
+import { useTheme } from '../../../context/ThemeContext';
 import { useStack } from '../../../store/StackContext';
+import { SpentaLogo } from '../../../components/SpentaLogo';
 import { copyTextWithFallback } from '../../../utils/shareUrlCodec';
 import { lazyWithRetry } from '../../../utils/lazyWithRetry';
 import { useSsotBriefing } from '../context/SsotBriefingContext';
@@ -14,6 +16,7 @@ const PitchDeckView = lazyWithRetry(() =>
 );
 
 export function ShareBriefingModal() {
+  const { theme } = useTheme();
   const { currency, personaTrack, investorCalculatorState } = useStack();
   const {
     shareModalOpen,
@@ -59,6 +62,7 @@ export function ShareBriefingModal() {
       >
         <div className="px-5 py-4 border-b border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
+            <SpentaLogo variant="mark" size="xs" tone={theme === 'dark' ? 'dark-bg' : 'light-bg'} />
             <Share2 className="w-4 h-4 text-[#1F3863] dark:text-[#8FA6E8]" />
             <h2
               id="ssot-share-modal-title"
@@ -134,6 +138,7 @@ export function ShareBriefingModal() {
 }
 
 export function OnboardingWizardModal() {
+  const { theme } = useTheme();
   const { currency, setCurrency, personaTrack, setPersonaTrack } = useStack();
   const {
     onboardingModalOpen,
@@ -167,6 +172,7 @@ export function OnboardingWizardModal() {
       >
         <div className="px-5 py-4 border-b border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] flex items-center justify-between">
           <div className="flex items-center gap-2">
+            <SpentaLogo variant="mark" size="xs" tone={theme === 'dark' ? 'dark-bg' : 'light-bg'} />
             <Compass className="w-4 h-4 text-[#1C6E46] dark:text-[#6FCB9F]" />
             <h2
               id="ssot-onboarding-title"
@@ -267,6 +273,7 @@ export function OnboardingWizardModal() {
 }
 
 export function PitchDeckModal() {
+  const { theme } = useTheme();
   const {
     pitchDeckModalOpen,
     setPitchDeckModalOpen,
@@ -299,6 +306,7 @@ export function PitchDeckModal() {
       >
         <div className="px-5 py-3.5 border-b border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
+            <SpentaLogo variant="mark" size="xs" tone={theme === 'dark' ? 'dark-bg' : 'light-bg'} />
             <Presentation className="w-4 h-4 text-[#1F3863] dark:text-[#8FA6E8]" />
             <h2
               id="ssot-pitchdeck-modal-title"

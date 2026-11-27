@@ -19,12 +19,43 @@ import { buildInvestorBriefingPath } from '../../../utils/shareUrlCodec';
 
 export type FusionViewMode = 'overview' | 'deep-dive';
 export type ConfidenceLevelPct = 90 | 95 | 99;
+export type InvestorPartnerMode = 'investor' | 'partner';
+export type SentimentMood = 'bullish' | 'cautious' | 'neutral' | 'defensive';
+
+export const SENTIMENT_FILTER_MAP: Record<
+  SentimentMood,
+  { label: string; summary: string; filterCss: string }
+> = {
+  bullish: {
+    label: 'High Conviction',
+    summary: 'Enhanced chromatic clarity across return projections and moat surfaces.',
+    filterCss: 'saturate(1.22) contrast(1.04)',
+  },
+  cautious: {
+    label: 'Analytical Baseline',
+    summary: 'Calibrated institutional reference rendering with neutral telemetry contrast.',
+    filterCss: 'none',
+  },
+  neutral: {
+    label: 'Diligence Audit',
+    summary: 'Softened saturation optimized for extended table and financial statement review.',
+    filterCss: 'saturate(0.88) contrast(1.02)',
+  },
+  defensive: {
+    label: 'Downside Defense',
+    summary: 'Focus emphasis on downside stress tests, air-gapped security, and cash runway.',
+    filterCss: 'saturate(0.92) contrast(1.03)',
+  },
+};
 
 interface SentimentContextValue {
   avgSentiment: number;
   feedbackCount: number;
   highlightedChapterId: string | null;
   setHighlightedChapterId: (id: string | null) => void;
+  sentimentMood: SentimentMood;
+  setSentimentMood: (mood: SentimentMood) => void;
+  sentimentFilterCss: string;
 }
 
 const SentimentContext = createContext<SentimentContextValue | null>(null);
@@ -32,6 +63,7 @@ const SentimentContext = createContext<SentimentContextValue | null>(null);
 export function SentimentProvider({ children }: { children: React.ReactNode }) {
   const { investorFeedback } = useStack();
   const [highlightedChapterId, setHighlightedChapterId] = useState<string | null>(null);
+  const [sentimentMood, setSentimentMood] = useState<SentimentMood>('cautious');
 
   const avgSentiment = useMemo(() => {
     if (investorFeedback.length === 0) return 4.3;
@@ -39,14 +71,19 @@ export function SentimentProvider({ children }: { children: React.ReactNode }) {
     return Number((sum / investorFeedback.length).toFixed(2));
   }, [investorFeedback]);
 
+  const sentimentFilterCss = SENTIMENT_FILTER_MAP[sentimentMood].filterCss;
+
   const value = useMemo<SentimentContextValue>(
     () => ({
       avgSentiment,
       feedbackCount: investorFeedback.length,
       highlightedChapterId,
       setHighlightedChapterId,
+      sentimentMood,
+      setSentimentMood,
+      sentimentFilterCss,
     }),
-    [avgSentiment, investorFeedback.length, highlightedChapterId],
+    [avgSentiment, investorFeedback.length, highlightedChapterId, sentimentMood, sentimentFilterCss],
   );
 
   return <SentimentContext.Provider value={value}>{children}</SentimentContext.Provider>;
@@ -90,7 +127,11 @@ export function useSsotArPreview() {
 interface SsotBriefingContextValue {
   activeSectionId: string;
   pulsedSectionId: string | null;
+  highlightedSectionId: string | null;
+  scrollProgressPct: number;
   scrollToSection: (sectionId: string, options?: { updateUrl?: boolean }) => void;
+  investorMode: InvestorPartnerMode;
+  setInvestorMode: (mode: InvestorPartnerMode) => void;
   fusionViewMode: FusionViewMode;
   setFusionViewMode: (mode: FusionViewMode) => void;
   activeLayer: CoreLayerId;
@@ -100,6 +141,8 @@ interface SsotBriefingContextValue {
   setBearCaseEnabled: (enabled: boolean) => void;
   confidenceLevelPct: ConfidenceLevelPct;
   setConfidenceLevelPct: (pct: ConfidenceLevelPct) => void;
+  anomalyDrawerOpen: boolean;
+  setAnomalyDrawerOpen: (open: boolean) => void;
   shareModalOpen: boolean;
   setShareModalOpen: (open: boolean) => void;
   onboardingModalOpen: boolean;
@@ -143,27 +186,39 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
     () => ssotQueryState.section || 'ssot-hero',
   );
   const [pulsedSectionId, setPulsedSectionId] = useState<string | null>(null);
+  const [highlightedSectionId, setHighlightedSectionId] = useState<string | null>(null);
+  const [scrollProgressPct, setScrollProgressPct] = useState<number>(0);
+  const [investorMode, setInvestorMode] = useState<InvestorPartnerMode>('investor');
   const [fusionViewMode, setFusionViewMode] = useState<FusionViewMode>(
     () => ssotQueryState.view ?? 'overview',
   );
   const [activeLayer, setActiveLayer] = useState<CoreLayerId>('L6');
   const [bearCaseEnabled, setBearCaseEnabled] = useState<boolean>(false);
   const [confidenceLevelPct, setConfidenceLevelPct] = useState<ConfidenceLevelPct>(95);
+  const [anomalyDrawerOpen, setAnomalyDrawerOpen] = useState<boolean>(false);
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
   const [onboardingModalOpen, setOnboardingModalOpen] = useState<boolean>(false);
   const [pitchDeckModalOpen, setPitchDeckModalOpen] = useState<boolean>(false);
   const [exportingOneClickSummary, setExportingOneClickSummary] = useState<boolean>(false);
 
   const pulseTimerRef = useRef<number | null>(null);
+  const highlightTimerRef = useRef<number | null>(null);
 
   const triggerHeadingPulse = useCallback((sectionId: string) => {
     setPulsedSectionId(sectionId);
+    setHighlightedSectionId(sectionId);
     if (pulseTimerRef.current) {
       window.clearTimeout(pulseTimerRef.current);
+    }
+    if (highlightTimerRef.current) {
+      window.clearTimeout(highlightTimerRef.current);
     }
     pulseTimerRef.current = window.setTimeout(() => {
       setPulsedSectionId((prev) => (prev === sectionId ? null : prev));
     }, 1500);
+    highlightTimerRef.current = window.setTimeout(() => {
+      setHighlightedSectionId((prev) => (prev === sectionId ? null : prev));
+    }, 3000);
   }, []);
 
   useEffect(() => {
@@ -171,6 +226,29 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
       if (pulseTimerRef.current) {
         window.clearTimeout(pulseTimerRef.current);
       }
+      if (highlightTimerRef.current) {
+        window.clearTimeout(highlightTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Track continuous page scroll percentage (0%–100%)
+  useEffect(() => {
+    const computeProgress = () => {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop || 0;
+      const totalScrollable = Math.max(
+        1,
+        document.documentElement.scrollHeight - window.innerHeight,
+      );
+      const pct = Math.min(100, Math.max(0, Math.round((scrollTop / totalScrollable) * 100)));
+      setScrollProgressPct(pct);
+    };
+    computeProgress();
+    window.addEventListener('scroll', computeProgress, { passive: true });
+    window.addEventListener('resize', computeProgress, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', computeProgress);
+      window.removeEventListener('resize', computeProgress);
     };
   }, []);
 
@@ -259,7 +337,12 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
 
   // Observe visible sections to update active rail node cleanly without resetting URL path
   useEffect(() => {
-    const ids = ['ssot-hero', ...BRIEFING_CHAPTERS.map((c) => c.id)];
+    const ids = [
+      'ssot-hero',
+      ...BRIEFING_CHAPTERS.map((c) => c.id),
+      'ssot-milestones',
+      'ssot-value-exchange',
+    ];
     const elements = ids
       .map((id) => document.getElementById(id))
       .filter((el): el is HTMLElement => Boolean(el));
@@ -274,7 +357,7 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
           setActiveSectionId(visible[0].target.id);
         }
       },
-      { rootMargin: '-22% 0px -58% 0px', threshold: [0.1, 0.35, 0.6] },
+      { rootMargin: '-20% 0px -56% 0px', threshold: [0.1, 0.35, 0.6] },
     );
 
     elements.forEach((el) => observer.observe(el));
@@ -310,7 +393,7 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
         'SPENTA TECHNOLOGY — INTELLIGENT REALITY | INVESTOR MASTER SSOT SUMMARY',
         '========================================================================',
         `Generated: ${new Date().toISOString()}`,
-        `Briefing Track: ${personaTrack.toUpperCase()} | Scenario: ${investorCalculatorState.scenario.toUpperCase()} | Currency: ${currency} (FX ${fx.toFixed(2)} BDT/USD)`,
+        `Audience Mode: ${investorMode.toUpperCase()} | Briefing Track: ${personaTrack.toUpperCase()} | Scenario: ${investorCalculatorState.scenario.toUpperCase()} | Currency: ${currency} (FX ${fx.toFixed(2)} BDT/USD)`,
         `Downside Sensitivity Stress: ${bearCaseEnabled ? 'ACTIVE (Bear Case)' : 'Nominal Baseline'}`,
         '',
         '1. ROUND INSTRUMENT & VALUATION',
@@ -330,7 +413,6 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
         shareUrl,
       ];
 
-      // Small yield so institutional loading state & spinner visibly render cleanly
       await new Promise((r) => window.setTimeout(r, 320));
 
       const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
@@ -350,6 +432,7 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
     exportingOneClickSummary,
     investorCalculatorState.fxRate,
     investorCalculatorState.scenario,
+    investorMode,
     personaTrack,
     currency,
     bearCaseEnabled,
@@ -361,7 +444,11 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
     () => ({
       activeSectionId,
       pulsedSectionId,
+      highlightedSectionId,
+      scrollProgressPct,
       scrollToSection,
+      investorMode,
+      setInvestorMode,
       fusionViewMode,
       setFusionViewMode,
       activeLayer,
@@ -371,6 +458,8 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
       setBearCaseEnabled,
       confidenceLevelPct,
       setConfidenceLevelPct,
+      anomalyDrawerOpen,
+      setAnomalyDrawerOpen,
       shareModalOpen,
       setShareModalOpen,
       onboardingModalOpen,
@@ -385,12 +474,16 @@ export function SsotBriefingProvider({ children }: { children: React.ReactNode }
     [
       activeSectionId,
       pulsedSectionId,
+      highlightedSectionId,
+      scrollProgressPct,
       scrollToSection,
+      investorMode,
       fusionViewMode,
       activeLayer,
       focusFusionLayer,
       bearCaseEnabled,
       confidenceLevelPct,
+      anomalyDrawerOpen,
       shareModalOpen,
       onboardingModalOpen,
       pitchDeckModalOpen,

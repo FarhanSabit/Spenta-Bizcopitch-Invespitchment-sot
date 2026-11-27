@@ -6,6 +6,7 @@ import {
   Download,
   HardDrive,
   Layers,
+  Mail,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -14,55 +15,100 @@ import {
   WifiOff,
   X,
 } from 'lucide-react';
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { useTheme } from '../context/ThemeContext';
 import { useStack } from '../store/StackContext';
 import {
   PersistenceStorageMetrics,
   PersistenceStoreName,
 } from '../utils/LocalPersistenceService';
+import { SyncEventLogViewer } from './SyncEventLogViewer';
 
 const STORE_METADATA: Record<
   PersistenceStoreName,
-  { label: string; description: string; swatchClass: string }
+  {
+    label: string;
+    shortLabel: string;
+    description: string;
+    swatchClass: string;
+    colorLight: string;
+    colorDark: string;
+  }
 > = {
   investorCalculator: {
     label: 'Active Investor Calculator',
+    shortLabel: 'Calculator',
     description: 'Current ROI, FX, dilution, and revenue-mix model parameters',
     swatchClass: 'bg-[#1F3863] dark:bg-[#8FA6E8]',
+    colorLight: '#1F3863',
+    colorDark: '#8FA6E8',
   },
   calculatorScenarios: {
     label: 'Saved Calculator Scenarios',
+    shortLabel: 'Scenarios',
     description: 'User-named financial modeling presets stored offline',
     swatchClass: 'bg-[#0891B2] dark:bg-[#22D3EE]',
+    colorLight: '#0891B2',
+    colorDark: '#22D3EE',
   },
   workspaceSnapshots: {
     label: 'Workspace Snapshots',
+    shortLabel: 'Snapshots',
     description: 'Auto-saved session checkpoint plus named stack snapshots',
     swatchClass: 'bg-[#1C6E46] dark:bg-[#6FCB9F]',
+    colorLight: '#1C6E46',
+    colorDark: '#6FCB9F',
   },
   chartProjections: {
     label: 'Cached Projections & Briefing',
+    shortLabel: 'Briefing Cache',
     description: 'Offline Investor Briefing SSOT cache and 5-year P&L / MOIC series',
     swatchClass: 'bg-[#B45309] dark:bg-[#F59E0B]',
+    colorLight: '#B45309',
+    colorDark: '#F59E0B',
   },
   userSession: {
     label: 'Active User Session',
+    shortLabel: 'Session',
     description: 'Last active portal tab, stack selection, and deployment target',
     swatchClass: 'bg-[#4F46E5] dark:bg-[#A5B4FC]',
+    colorLight: '#4F46E5',
+    colorDark: '#A5B4FC',
   },
   diligencePrefs: {
     label: 'Diligence Preferences',
+    shortLabel: 'Preferences',
     description: 'Investor persona track, currency mode, and Data Room bookmarks',
     swatchClass: 'bg-[#0D9488] dark:bg-[#5EEAD4]',
+    colorLight: '#0D9488',
+    colorDark: '#5EEAD4',
   },
   investorFeedback: {
     label: 'Investor Feedback & Notes',
+    shortLabel: 'Notes',
     description: 'Section-level diligence notes, replies, and sentiment ratings',
     swatchClass: 'bg-[#E11D48] dark:bg-[#FB7185]',
+    colorLight: '#E11D48',
+    colorDark: '#FB7185',
   },
   contactInquiries: {
     label: 'Offline Founder Inquiries',
+    shortLabel: 'Inquiries',
     description: 'Drafted SAFE term-sheet and founder outreach inquiries',
     swatchClass: 'bg-[#7C3AED] dark:bg-[#C4B5FD]',
+    colorLight: '#7C3AED',
+    colorDark: '#C4B5FD',
   },
 };
 
@@ -103,6 +149,7 @@ function formatTimestamp(iso: string | null): string {
 }
 
 export function StorageManager() {
+  const { isDark } = useTheme();
   const {
     persistenceService,
     syncStatus,
@@ -122,6 +169,14 @@ export function StorageManager() {
     deleteWorkspaceSnapshot,
     activeTab,
     selectedIds,
+    selectedApps,
+    deploymentProfile,
+    hitlConfidence,
+    investorCalculatorState,
+    currency,
+    personaTrack,
+    buildShareUrl,
+    setAutoNotice,
   } = useStack();
 
   const [metrics, setMetrics] = useState<PersistenceStorageMetrics | null>(null);
@@ -131,6 +186,11 @@ export function StorageManager() {
   const [scenarioNameInput, setScenarioNameInput] = useState<string>('');
   const [scenarioSearchQuery, setScenarioSearchQuery] = useState<string>('');
   const [snapshotNameInput, setSnapshotNameInput] = useState<string>('');
+  const [chartScope, setChartScope] = useState<'all' | 'focus'>('all');
+  const [selectedScenarioIds, setSelectedScenarioIds] = useState<Set<string>>(() => new Set());
+  const [selectedSnapshotIds, setSelectedSnapshotIds] = useState<Set<string>>(() => new Set());
+  const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState<boolean>(false);
+  const [bulkDeleting, setBulkDeleting] = useState<boolean>(false);
 
   const refreshMetrics = useCallback(async () => {
     setLoading(true);
@@ -146,26 +206,134 @@ export function StorageManager() {
     void refreshMetrics();
   }, [refreshMetrics, storageRevision]);
 
+  // Prune stale IDs if items were individually removed or cache cleared
   useEffect(() => {
-    if (!confirmClearOpen) return;
+    const validScenarioIds = new Set(savedCalculatorScenarios.map((s) => s.id));
+    setSelectedScenarioIds((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validScenarioIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [savedCalculatorScenarios]);
+
+  useEffect(() => {
+    const validSnapshotIds = new Set(workspaceSnapshots.map((s) => s.id));
+    setSelectedSnapshotIds((prev) => {
+      if (prev.size === 0) return prev;
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (validSnapshotIds.has(id)) {
+          next.add(id);
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [workspaceSnapshots]);
+
+  useEffect(() => {
+    if (!confirmClearOpen && !bulkDeleteDialogOpen) return;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !clearing) {
-        setConfirmClearOpen(false);
+      if (event.key === 'Escape') {
+        if (confirmClearOpen && !clearing) setConfirmClearOpen(false);
+        if (bulkDeleteDialogOpen && !bulkDeleting) setBulkDeleteDialogOpen(false);
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [confirmClearOpen, clearing]);
+  }, [confirmClearOpen, clearing, bulkDeleteDialogOpen, bulkDeleting]);
 
   const handleConfirmClear = async () => {
     setClearing(true);
     try {
       await clearLocalCachedData();
+      setSelectedScenarioIds(new Set());
+      setSelectedSnapshotIds(new Set());
       setConfirmClearOpen(false);
       const next = await persistenceService.getStorageMetrics();
       setMetrics(next);
     } finally {
       setClearing(false);
+    }
+  };
+
+  const toggleScenarioSelection = useCallback((id: string) => {
+    setSelectedScenarioIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSnapshotSelection = useCallback((id: string) => {
+    setSelectedSnapshotIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
+
+  const clearBulkSelection = useCallback(() => {
+    setSelectedScenarioIds(new Set());
+    setSelectedSnapshotIds(new Set());
+  }, []);
+
+  const totalBulkSelected = selectedScenarioIds.size + selectedSnapshotIds.size;
+
+  const selectedScenarioRecords = useMemo(
+    () => savedCalculatorScenarios.filter((item) => selectedScenarioIds.has(item.id)),
+    [savedCalculatorScenarios, selectedScenarioIds],
+  );
+
+  const selectedSnapshotRecords = useMemo(
+    () => workspaceSnapshots.filter((snap) => selectedSnapshotIds.has(snap.id)),
+    [workspaceSnapshots, selectedSnapshotIds],
+  );
+
+  const handleConfirmBulkDelete = async () => {
+    const scenarioIdsToDelete = Array.from(selectedScenarioIds);
+    const snapshotIdsToDelete = Array.from(selectedSnapshotIds);
+    const totalCount = scenarioIdsToDelete.length + snapshotIdsToDelete.length;
+    if (totalCount === 0) {
+      setBulkDeleteDialogOpen(false);
+      return;
+    }
+
+    setBulkDeleting(true);
+    try {
+      for (const id of scenarioIdsToDelete) {
+        await deleteCalculatorScenario(id);
+      }
+      for (const id of snapshotIdsToDelete) {
+        await deleteWorkspaceSnapshot(id);
+      }
+      clearBulkSelection();
+      setBulkDeleteDialogOpen(false);
+      const next = await persistenceService.getStorageMetrics();
+      setMetrics(next);
+      setAutoNotice(
+        `Bulk deleted ${scenarioIdsToDelete.length} scenario${scenarioIdsToDelete.length === 1 ? '' : 's'} and ${snapshotIdsToDelete.length} workspace snapshot${snapshotIdsToDelete.length === 1 ? '' : 's'} from IndexedDB`,
+      );
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -204,12 +372,134 @@ export function StorageManager() {
     const totalBytes = metrics?.estimatedPayloadBytes ?? 0;
     return [...stats]
       .sort((a, b) => b.bytes - a.bytes || b.count - a.count)
-      .map((row) => ({
-        ...row,
-        meta: STORE_METADATA[row.store],
-        sharePct: totalBytes > 0 ? (row.bytes / totalBytes) * 100 : 0,
+      .map((row) => {
+        const meta = STORE_METADATA[row.store];
+        return {
+          ...row,
+          meta,
+          name: meta.shortLabel,
+          fullName: meta.label,
+          fill: isDark ? meta.colorDark : meta.colorLight,
+          sharePct: totalBytes > 0 ? (row.bytes / totalBytes) * 100 : 0,
+        };
+      });
+  }, [metrics, isDark]);
+
+  const activeChartData = useMemo(() => {
+    if (chartScope === 'focus') {
+      const targetStores = new Set<PersistenceStoreName>([
+        'calculatorScenarios',
+        'workspaceSnapshots',
+        'investorCalculator',
+      ]);
+      const focused = storageBreakdown.filter((item) => targetStores.has(item.store));
+      const focusedTotal = focused.reduce((sum, item) => sum + item.bytes, 0);
+      return focused.map((item) => ({
+        ...item,
+        scopeSharePct: focusedTotal > 0 ? (item.bytes / focusedTotal) * 100 : 0,
       }));
-  }, [metrics]);
+    }
+    return storageBreakdown.map((item) => ({
+      ...item,
+      scopeSharePct: item.sharePct,
+    }));
+  }, [chartScope, storageBreakdown]);
+
+  const pieChartData = useMemo(() => {
+    const nonZero = activeChartData.filter((item) => item.bytes > 0);
+    return nonZero;
+  }, [activeChartData]);
+
+  const scenarioAndSnapshotBytes = useMemo(() => {
+    return storageBreakdown
+      .filter(
+        (item) =>
+          item.store === 'calculatorScenarios' || item.store === 'workspaceSnapshots',
+      )
+      .reduce((sum, item) => sum + item.bytes, 0);
+  }, [storageBreakdown]);
+
+  const scenarioAndSnapshotSharePct = useMemo(() => {
+    const total = metrics?.estimatedPayloadBytes ?? 0;
+    return total > 0 ? (scenarioAndSnapshotBytes / total) * 100 : 0;
+  }, [metrics, scenarioAndSnapshotBytes]);
+
+  const buildSessionMailtoUrl = useCallback(() => {
+    const shareUrl = buildShareUrl();
+    const totalBytes = metrics?.estimatedPayloadBytes ?? 0;
+    const scenarioBytes =
+      storageBreakdown.find((s) => s.store === 'calculatorScenarios')?.bytes ?? 0;
+    const snapshotBytes =
+      storageBreakdown.find((s) => s.store === 'workspaceSnapshots')?.bytes ?? 0;
+    const moduleNames =
+      selectedApps.length > 0
+        ? selectedApps.slice(0, 8).map((a) => a.name).join(', ') +
+          (selectedApps.length > 8 ? ` (+${selectedApps.length - 8} more)` : '')
+        : 'None selected';
+
+    const subject = `Spenta Sovereign OS Session & Snapshot — ${activeTab} (${selectedIds.length} modules)`;
+    const bodyLines = [
+      'SPENTA SOVEREIGN OS — SESSION STATE & SNAPSHOT SUMMARY',
+      '======================================================',
+      '',
+      `Active Workspace Tab: ${activeTab}`,
+      `Deployment Posture: ${deploymentProfile.title} (${deploymentProfile.id})`,
+      `Selected Stack (${selectedIds.length}): ${moduleNames}`,
+      `HITL OPA Threshold: ${hitlConfidence.toFixed(2)}`,
+      '',
+      'FINANCIAL MODEL & BRIEFING TRACK',
+      `- Scenario Mode: ${investorCalculatorState.scenario.toUpperCase()} | Currency: ${currency} (FX ${investorCalculatorState.fxRate.toFixed(2)} BDT/USD)`,
+      `- Check Size: $${investorCalculatorState.investmentK}K | Exit Multiple: ${investorCalculatorState.exitMultiple}x | Horizon: ${investorCalculatorState.horizonYears} yrs`,
+      `- Investor Track: ${personaTrack}`,
+      '',
+      'OFFLINE STORAGE & SYNC SNAPSHOT',
+      `- Sync State: ${syncStatus.toUpperCase()} (${isOnline ? 'Online' : 'Offline'})`,
+      `- Last Synced: ${formatTimestamp(lastSyncedAt ?? metrics?.lastUpdatedAt ?? null)}`,
+      `- Saved Scenarios: ${savedCalculatorScenarios.length} (${formatBytes(scenarioBytes)})`,
+      `- Workspace Snapshots: ${workspaceSnapshots.length} (${formatBytes(snapshotBytes)})`,
+      `- Total Local Footprint: ${formatBytes(totalBytes)} across ${metrics?.totalEntries ?? 0} records`,
+      '',
+      'SHARED SNAPSHOT LINK',
+      shareUrl,
+    ];
+
+    return `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(
+      bodyLines.join('\n'),
+    )}`;
+  }, [
+    activeTab,
+    buildShareUrl,
+    currency,
+    deploymentProfile.id,
+    deploymentProfile.title,
+    hitlConfidence,
+    investorCalculatorState.exitMultiple,
+    investorCalculatorState.fxRate,
+    investorCalculatorState.horizonYears,
+    investorCalculatorState.investmentK,
+    investorCalculatorState.scenario,
+    isOnline,
+    lastSyncedAt,
+    metrics,
+    personaTrack,
+    savedCalculatorScenarios.length,
+    selectedApps,
+    selectedIds.length,
+    storageBreakdown,
+    syncStatus,
+    workspaceSnapshots.length,
+  ]);
+
+  const handleOpenEmailClient = useCallback(() => {
+    const mailtoHref = buildSessionMailtoUrl();
+    const anchor = document.createElement('a');
+    anchor.href = mailtoHref;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    setAutoNotice('Opened default email client with session summary & shared snapshot link');
+  }, [buildSessionMailtoUrl, setAutoNotice]);
 
   const filteredScenarios = useMemo(() => {
     const q = scenarioSearchQuery.trim().toLowerCase();
@@ -285,6 +575,17 @@ export function StorageManager() {
             >
               <Download className="w-3.5 h-3.5" strokeWidth={1.6} />
               <span>Export Data</span>
+            </button>
+
+            <button
+              type="button"
+              data-testid="storage-email-session-btn"
+              onClick={handleOpenEmailClient}
+              title="Open default email client with session state summary and shared snapshot link"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#0891B2] dark:hover:border-[#22D3EE] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Mail className="w-3.5 h-3.5" strokeWidth={1.6} />
+              <span>Email Snapshot</span>
             </button>
 
             <button
@@ -473,29 +774,61 @@ export function StorageManager() {
         </div>
       </div>
 
-      {/* Storage Breakdown by Item Type (Sorted Largest Consumer First) */}
+      {/* Storage Breakdown by Item Type (Recharts Donut + Ranked Horizontal Bar Chart) */}
       <div
         data-testid="storage-breakdown-by-type"
-        className="rounded-2xl border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] p-5"
+        className="rounded-2xl border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] p-5 space-y-5"
       >
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-[#E4DFD6] dark:border-[#232B4A]">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[#E4DFD6] dark:border-[#232B4A]">
           <div>
             <h3 className="text-sm font-bold text-[#16213A] dark:text-[#E7EBF5]">
               Storage Breakdown by Type
             </h3>
             <p className="text-xs text-[#5F6576] dark:text-[#8E96B0] mt-0.5">
-              Ranked by serialized byte consumption across scenarios, workspace snapshots, briefing caches, and diligence notes.
+              Interactive footprint across saved calculator scenarios, workspace snapshots, briefing caches, and diligence notes.
             </p>
           </div>
-          <span className="text-xs font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0]">
-            {formatBytes(metrics?.estimatedPayloadBytes ?? 0)} allocated
-          </span>
+
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <div
+              role="group"
+              aria-label="Filter storage chart scope"
+              className="inline-flex rounded-lg bg-[#F2EFE9] dark:bg-[#0F1529] p-0.5 border border-[#E4DFD6] dark:border-[#232B4A]"
+            >
+              <button
+                type="button"
+                onClick={() => setChartScope('all')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  chartScope === 'all'
+                    ? 'bg-white dark:bg-[#141A32] text-[#16213A] dark:text-[#E7EBF5] shadow-xs'
+                    : 'text-[#5F6576] dark:text-[#8E96B0]'
+                }`}
+              >
+                All Stores
+              </button>
+              <button
+                type="button"
+                onClick={() => setChartScope('focus')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  chartScope === 'focus'
+                    ? 'bg-white dark:bg-[#141A32] text-[#16213A] dark:text-[#E7EBF5] shadow-xs'
+                    : 'text-[#5F6576] dark:text-[#8E96B0]'
+                }`}
+              >
+                Scenarios &amp; Snapshots
+              </button>
+            </div>
+
+            <span className="text-xs font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0]">
+              {formatBytes(metrics?.estimatedPayloadBytes ?? 0)} allocated
+            </span>
+          </div>
         </div>
 
         {/* Multi-segment proportional bar */}
         <div
           aria-label="Proportional storage usage bar"
-          className="mt-4 h-3 w-full rounded-md bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A] overflow-hidden flex gap-0.5 p-0.5"
+          className="h-2.5 w-full rounded-md bg-[#FAF8F4] dark:bg-[#0F1529] border border-[#E4DFD6] dark:border-[#232B4A] overflow-hidden flex gap-0.5 p-0.5"
         >
           {storageBreakdown
             .filter((item) => item.bytes > 0)
@@ -509,30 +842,164 @@ export function StorageManager() {
             ))}
         </div>
 
-        {/* Ranked Type Rows */}
-        <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5">
-          {storageBreakdown.map((item) => (
-            <div key={item.store} className="space-y-1">
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className={`w-2 h-2 rounded-xs shrink-0 ${item.meta.swatchClass}`} />
-                  <span className="font-medium text-[#16213A] dark:text-[#E7EBF5] truncate">
-                    {item.meta.label}
-                  </span>
-                  <span className="text-[11px] font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0] shrink-0">
-                    ({item.count})
-                  </span>
-                </div>
-                <span className="font-mono tabular-nums text-[11px] text-[#5F6576] dark:text-[#8E96B0] shrink-0">
-                  {formatBytes(item.bytes)} · {item.sharePct.toFixed(1)}%
+        {/* Recharts Charts Row: Allocation Donut (left) + Serialized Byte BarChart (right) */}
+        {pieChartData.length === 0 ? (
+          <div className="py-10 text-center space-y-2 border border-dashed border-[#E4DFD6] dark:border-[#232B4A] rounded-xl">
+            <p className="text-xs text-[#5F6576] dark:text-[#8E96B0]">
+              No cached bytes recorded in the selected storage scope yet. Save a scenario or snapshot below to inspect space allocation.
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+            {/* Recharts PieChart (Donut) */}
+            <div className="lg:col-span-5 flex flex-col justify-between gap-3 pt-1 lg:pr-5 lg:border-r lg:border-[#E4DFD6] dark:lg:border-[#232B4A]">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-[#16213A] dark:text-[#E7EBF5]">
+                  Share of Allocated Space
+                </span>
+                <span className="font-mono tabular-nums text-[11px] text-[#5F6576] dark:text-[#8E96B0]">
+                  Scenarios + Snapshots: {scenarioAndSnapshotSharePct.toFixed(1)}%
                 </span>
               </div>
-              <div className="h-1.5 w-full rounded-sm bg-[#FAF8F4] dark:bg-[#0F1529] overflow-hidden">
-                <div
-                  className={`h-full rounded-sm ${item.meta.swatchClass} transition-all`}
-                  style={{ width: `${item.bytes > 0 ? Math.max(item.sharePct, 2) : 0}%` }}
-                />
+
+              <div className="relative h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={pieChartData}
+                      dataKey="bytes"
+                      nameKey="fullName"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={56}
+                      outerRadius={84}
+                      paddingAngle={2}
+                      stroke="none"
+                    >
+                      {pieChartData.map((entry) => (
+                        <Cell key={entry.store} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(val, _name, item) => {
+                        const bytes = Number(val ?? 0);
+                        const pct = item?.payload?.scopeSharePct ?? 0;
+                        const cnt = item?.payload?.count ?? 0;
+                        return [
+                          `${formatBytes(bytes)} · ${pct.toFixed(1)}% (${cnt} rec)`,
+                          item?.payload?.fullName ?? 'Store',
+                        ];
+                      }}
+                      contentStyle={{
+                        backgroundColor: isDark ? '#0F1529' : '#FFFFFF',
+                        borderColor: isDark ? '#232B4A' : '#E4DFD6',
+                        color: isDark ? '#E7EBF5' : '#16213A',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+
+                {/* Centered Total Readout */}
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+                  <span className="text-[10px] font-mono text-[#5F6576] dark:text-[#8E96B0]">
+                    {chartScope === 'focus' ? 'Models + Snapshots' : 'Total Cached'}
+                  </span>
+                  <span className="text-sm font-bold font-mono tabular-nums text-[#16213A] dark:text-[#E7EBF5] mt-0.5">
+                    {formatBytes(
+                      activeChartData.reduce((acc, item) => acc + item.bytes, 0),
+                    )}
+                  </span>
+                </div>
               </div>
+            </div>
+
+            {/* Recharts Horizontal BarChart */}
+            <div className="lg:col-span-7 flex flex-col justify-between gap-3 pt-1">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-[#16213A] dark:text-[#E7EBF5]">
+                  Byte Allocation by Store
+                </span>
+                <span className="font-mono tabular-nums text-[11px] text-[#5F6576] dark:text-[#8E96B0]">
+                  {activeChartData.length} object store{activeChartData.length === 1 ? '' : 's'}
+                </span>
+              </div>
+
+              <div className="h-56 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={activeChartData}
+                    layout="vertical"
+                    margin={{ top: 4, right: 20, left: 6, bottom: 4 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      horizontal={false}
+                      stroke={isDark ? '#232B4A' : '#E4DFD6'}
+                    />
+                    <XAxis
+                      type="number"
+                      tick={{ fontSize: 10, fill: isDark ? '#8E96B0' : '#5F6576' }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v: number) => formatBytes(v)}
+                    />
+                    <YAxis
+                      type="category"
+                      dataKey="name"
+                      width={96}
+                      tick={{ fontSize: 11, fill: isDark ? '#E7EBF5' : '#16213A' }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <Tooltip
+                      cursor={{ fill: isDark ? 'rgba(143,166,232,0.08)' : 'rgba(31,56,99,0.05)' }}
+                      formatter={(val, _name, item) => {
+                        const bytes = Number(val ?? 0);
+                        const cnt = item?.payload?.count ?? 0;
+                        const pct = item?.payload?.scopeSharePct ?? 0;
+                        return [
+                          `${formatBytes(bytes)} (${pct.toFixed(1)}%, ${cnt} entries)`,
+                          item?.payload?.fullName ?? 'Storage',
+                        ];
+                      }}
+                      contentStyle={{
+                        backgroundColor: isDark ? '#0F1529' : '#FFFFFF',
+                        borderColor: isDark ? '#232B4A' : '#E4DFD6',
+                        color: isDark ? '#E7EBF5' : '#16213A',
+                        borderRadius: '8px',
+                        fontSize: '11px',
+                      }}
+                    />
+                    <Bar dataKey="bytes" radius={[0, 6, 6, 0]} barSize={16}>
+                      {activeChartData.map((entry) => (
+                        <Cell key={entry.store} fill={entry.fill} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Ranked Type Legend Summary */}
+        <div className="pt-3 border-t border-[#E4DFD6] dark:border-[#232B4A] grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-x-5 gap-y-2">
+          {storageBreakdown.map((item) => (
+            <div key={item.store} className="flex items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`w-2 h-2 rounded-xs shrink-0 ${item.meta.swatchClass}`} />
+                <span className="font-medium text-[#16213A] dark:text-[#E7EBF5] truncate">
+                  {item.meta.shortLabel}
+                </span>
+                <span className="text-[11px] font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0] shrink-0">
+                  ({item.count})
+                </span>
+              </div>
+              <span className="font-mono tabular-nums text-[11px] text-[#5F6576] dark:text-[#8E96B0] shrink-0">
+                {formatBytes(item.bytes)} · {item.sharePct.toFixed(1)}%
+              </span>
             </div>
           ))}
         </div>
@@ -598,6 +1065,153 @@ export function StorageManager() {
         </div>
       </div>
 
+      {/* Bulk Selection Action Bar */}
+      {totalBulkSelected > 0 && (
+        <div
+          data-testid="bulk-delete-bar"
+          role="region"
+          aria-label="Bulk selection actions"
+          className="rounded-xl border border-[#FECACA] dark:border-[#7F1D1D] bg-[#FEF2F2]/85 dark:bg-[#2A1215]/75 px-4 py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-2.5 text-xs text-[#7F1D1D] dark:text-[#FECACA]">
+            <AlertTriangle className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+            <span className="font-semibold tabular-nums">
+              {totalBulkSelected} item{totalBulkSelected === 1 ? '' : 's'} selected
+            </span>
+            <span className="font-mono text-[11px] tabular-nums opacity-90">
+              ({selectedScenarioIds.size} scenario{selectedScenarioIds.size === 1 ? '' : 's'} ·{' '}
+              {selectedSnapshotIds.size} snapshot{selectedSnapshotIds.size === 1 ? '' : 's'})
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={clearBulkSelection}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] text-[#16213A] dark:text-[#E7EBF5] hover:opacity-90 cursor-pointer whitespace-nowrap"
+            >
+              Clear Selection
+            </button>
+            <button
+              type="button"
+              data-testid="bulk-delete-open-btn"
+              onClick={() => setBulkDeleteDialogOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#DC2626] hover:bg-[#B91C1C] text-white cursor-pointer whitespace-nowrap"
+            >
+              <Trash2 className="w-3.5 h-3.5" strokeWidth={1.75} />
+              <span>Bulk Delete ({totalBulkSelected})</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Safety Confirmation Dialog for Bulk Delete (No window.confirm/alert) */}
+      {bulkDeleteDialogOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 backdrop-blur-xs p-4"
+          onClick={() => {
+            if (!bulkDeleting) setBulkDeleteDialogOpen(false);
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="bulk-delete-modal-title"
+            aria-describedby="bulk-delete-modal-description"
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-2xl border border-[#E4DFD6] dark:border-[#232B4A] bg-white dark:bg-[#141A32] p-5 sm:p-6 shadow-2xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-[#FEF2F2] dark:bg-[#2A1215] border border-[#FECACA] dark:border-[#7F1D1D] flex items-center justify-center shrink-0">
+                  <AlertTriangle
+                    className="w-4 h-4 text-[#DC2626] dark:text-[#FCA5A5]"
+                    strokeWidth={1.75}
+                  />
+                </div>
+                <div>
+                  <h3
+                    id="bulk-delete-modal-title"
+                    className="text-base font-bold text-[#16213A] dark:text-[#E7EBF5]"
+                  >
+                    Delete {totalBulkSelected} Selected Item{totalBulkSelected === 1 ? '' : 's'}?
+                  </h3>
+                  <p
+                    id="bulk-delete-modal-description"
+                    className="mt-1.5 text-xs text-[#4A5568] dark:text-[#A4ADC6] leading-relaxed"
+                  >
+                    This permanently deletes{' '}
+                    <strong className="text-[#16213A] dark:text-[#E7EBF5] tabular-nums">
+                      {selectedScenarioIds.size} saved scenario{selectedScenarioIds.size === 1 ? '' : 's'}
+                    </strong>{' '}
+                    and{' '}
+                    <strong className="text-[#16213A] dark:text-[#E7EBF5] tabular-nums">
+                      {selectedSnapshotIds.size} workspace snapshot{selectedSnapshotIds.size === 1 ? '' : 's'}
+                    </strong>{' '}
+                    from local IndexedDB storage. This action cannot be undone.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setBulkDeleteDialogOpen(false)}
+                disabled={bulkDeleting}
+                aria-label="Close bulk delete confirmation modal"
+                className="p-1 rounded-md text-[#5F6576] dark:text-[#8E96B0] hover:text-[#16213A] dark:hover:text-[#E7EBF5] cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" strokeWidth={1.75} />
+              </button>
+            </div>
+
+            {(selectedScenarioRecords.length > 0 || selectedSnapshotRecords.length > 0) && (
+              <div className="mt-4 max-h-40 overflow-y-auto rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] p-3 space-y-1.5 text-xs">
+                {selectedScenarioRecords.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex items-center justify-between gap-2 text-[#16213A] dark:text-[#E7EBF5]"
+                  >
+                    <span className="truncate font-medium">{item.name}</span>
+                    <span className="font-mono text-[10px] text-[#5F6576] dark:text-[#8E96B0] shrink-0">
+                      Scenario
+                    </span>
+                  </div>
+                ))}
+                {selectedSnapshotRecords.map((snap) => (
+                  <div
+                    key={snap.id}
+                    className="flex items-center justify-between gap-2 text-[#16213A] dark:text-[#E7EBF5]"
+                  >
+                    <span className="truncate font-medium">{snap.name}</span>
+                    <span className="font-mono text-[10px] text-[#5F6576] dark:text-[#8E96B0] shrink-0">
+                      Snapshot
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-5 pt-4 border-t border-[#E4DFD6] dark:border-[#232B4A] flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setBulkDeleteDialogOpen(false)}
+                disabled={bulkDeleting}
+                className="px-3.5 py-2 rounded-lg text-xs font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:opacity-90 cursor-pointer whitespace-nowrap"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                data-testid="bulk-delete-confirm-btn"
+                onClick={() => void handleConfirmBulkDelete()}
+                disabled={bulkDeleting}
+                className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-[#DC2626] hover:bg-[#B91C1C] text-white cursor-pointer whitespace-nowrap disabled:opacity-60"
+              >
+                {bulkDeleting ? 'Deleting…' : `Delete ${totalBulkSelected} Item${totalBulkSelected === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Saved Scenarios & Workspace Snapshots Management */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Saved Scenarios Panel */}
@@ -662,7 +1276,41 @@ export function StorageManager() {
             )}
           </div>
 
-          <div className="mt-3 divide-y divide-[#E4DFD6] dark:divide-[#232B4A] flex-1">
+          {filteredScenarios.length > 0 && (
+            <div className="mt-2.5 pt-2 border-t border-[#E4DFD6] dark:border-[#232B4A] flex items-center justify-between gap-2 text-[11px]">
+              <label className="inline-flex items-center gap-2 text-[#5F6576] dark:text-[#8E96B0] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={filteredScenarios.every((item) => selectedScenarioIds.has(item.id))}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setSelectedScenarioIds((prev) => {
+                      const next = new Set(prev);
+                      filteredScenarios.forEach((item) => {
+                        if (checked) next.add(item.id);
+                        else next.delete(item.id);
+                      });
+                      return next;
+                    });
+                  }}
+                  aria-label="Select all visible scenarios"
+                  className="rounded border-[#CFC8BC] dark:border-[#2E3862] accent-[#1F3863] dark:accent-[#8FA6E8] cursor-pointer"
+                />
+                <span>Select all visible ({filteredScenarios.length})</span>
+              </label>
+              {selectedScenarioIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setBulkDeleteDialogOpen(true)}
+                  className="font-semibold text-[#B91C1C] dark:text-[#FCA5A5] hover:underline cursor-pointer tabular-nums"
+                >
+                  Delete selected ({selectedScenarioIds.size})
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="mt-2 divide-y divide-[#E4DFD6] dark:divide-[#232B4A] flex-1">
             {savedCalculatorScenarios.length === 0 ? (
               <div className="py-8 text-center text-xs text-[#5F6576] dark:text-[#8E96B0]">
                 No named investor scenarios saved yet. Save your active calculator parameters above to benchmark cases offline.
@@ -681,39 +1329,54 @@ export function StorageManager() {
                 </button>
               </div>
             ) : (
-              filteredScenarios.map((item) => (
-                <div
-                  key={item.id}
-                  className="py-3 flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5] truncate">
-                      {item.name}
+              filteredScenarios.map((item) => {
+                const isSelected = selectedScenarioIds.has(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className={`py-3 flex items-center justify-between gap-3 rounded-lg transition-colors ${
+                      isSelected ? 'bg-[#FAF8F4] dark:bg-[#0F1529]/80 px-2 -mx-2' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        data-testid={`select-scenario-${item.id}`}
+                        checked={isSelected}
+                        onChange={() => toggleScenarioSelection(item.id)}
+                        aria-label={`Select scenario ${item.name}`}
+                        className="rounded border-[#CFC8BC] dark:border-[#2E3862] accent-[#1F3863] dark:accent-[#8FA6E8] cursor-pointer shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5] truncate">
+                          {item.name}
+                        </div>
+                        <div className="text-[11px] font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0] mt-0.5">
+                          {item.state.scenario} · ${item.state.investmentK}K · {item.state.exitMultiple}x exit · {formatTimestamp(item.updatedAt)}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-[11px] font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0] mt-0.5">
-                      {item.state.scenario} · ${item.state.investmentK}K · {item.state.exitMultiple}x exit · {formatTimestamp(item.updatedAt)}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => applyCalculatorScenario(item.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1F3863] dark:hover:border-[#8FA6E8] cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" strokeWidth={1.6} />
+                        <span>Apply</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteCalculatorScenario(item.id)}
+                        aria-label={`Delete scenario ${item.name}`}
+                        className="p-1.5 rounded-md text-[#5F6576] dark:text-[#8E96B0] hover:text-[#B91C1C] dark:hover:text-[#FCA5A5] hover:bg-[#FEF2F2] dark:hover:bg-[#2A1215] cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" strokeWidth={1.6} />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => applyCalculatorScenario(item.id)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1F3863] dark:hover:border-[#8FA6E8] cursor-pointer"
-                    >
-                      <RotateCcw className="w-3 h-3" strokeWidth={1.6} />
-                      <span>Apply</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void deleteCalculatorScenario(item.id)}
-                      aria-label={`Delete scenario ${item.name}`}
-                      className="p-1.5 rounded-md text-[#5F6576] dark:text-[#8E96B0] hover:text-[#B91C1C] dark:hover:text-[#FCA5A5] hover:bg-[#FEF2F2] dark:hover:bg-[#2A1215] cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" strokeWidth={1.6} />
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -754,49 +1417,96 @@ export function StorageManager() {
             </button>
           </form>
 
-          <div className="mt-3 divide-y divide-[#E4DFD6] dark:divide-[#232B4A] flex-1">
+          {workspaceSnapshots.length > 0 && (
+            <div className="mt-2.5 pt-2 border-t border-[#E4DFD6] dark:border-[#232B4A] flex items-center justify-between gap-2 text-[11px]">
+              <label className="inline-flex items-center gap-2 text-[#5F6576] dark:text-[#8E96B0] cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={workspaceSnapshots.every((snap) => selectedSnapshotIds.has(snap.id))}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setSelectedSnapshotIds(
+                      checked ? new Set(workspaceSnapshots.map((s) => s.id)) : new Set(),
+                    );
+                  }}
+                  aria-label="Select all workspace snapshots"
+                  className="rounded border-[#CFC8BC] dark:border-[#2E3862] accent-[#1C6E46] dark:accent-[#6FCB9F] cursor-pointer"
+                />
+                <span>Select all ({workspaceSnapshots.length})</span>
+              </label>
+              {selectedSnapshotIds.size > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setBulkDeleteDialogOpen(true)}
+                  className="font-semibold text-[#B91C1C] dark:text-[#FCA5A5] hover:underline cursor-pointer tabular-nums"
+                >
+                  Delete selected ({selectedSnapshotIds.size})
+                </button>
+              )}
+            </div>
+          )}
+
+          <div className="mt-2 divide-y divide-[#E4DFD6] dark:divide-[#232B4A] flex-1">
             {workspaceSnapshots.length === 0 ? (
               <div className="py-8 text-center text-xs text-[#5F6576] dark:text-[#8E96B0]">
                 No named workspace snapshots yet. Your active session is auto-saved continuously; create a named checkpoint above to switch stacks cleanly.
               </div>
             ) : (
-              workspaceSnapshots.map((snap) => (
-                <div
-                  key={snap.id}
-                  className="py-3 flex items-center justify-between gap-3"
-                >
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5] truncate">
-                      {snap.name}
+              workspaceSnapshots.map((snap) => {
+                const isSelected = selectedSnapshotIds.has(snap.id);
+                return (
+                  <div
+                    key={snap.id}
+                    className={`py-3 flex items-center justify-between gap-3 rounded-lg transition-colors ${
+                      isSelected ? 'bg-[#FAF8F4] dark:bg-[#0F1529]/80 px-2 -mx-2' : ''
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <input
+                        type="checkbox"
+                        data-testid={`select-snapshot-${snap.id}`}
+                        checked={isSelected}
+                        onChange={() => toggleSnapshotSelection(snap.id)}
+                        aria-label={`Select snapshot ${snap.name}`}
+                        className="rounded border-[#CFC8BC] dark:border-[#2E3862] accent-[#1C6E46] dark:accent-[#6FCB9F] cursor-pointer shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5] truncate">
+                          {snap.name}
+                        </div>
+                        <div className="text-[11px] font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0] mt-0.5">
+                          {snap.activeTab} · {snap.selectedIds.length} modules · {snap.deploymentTarget} · {formatTimestamp(snap.updatedAt)}
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-[11px] font-mono tabular-nums text-[#5F6576] dark:text-[#8E96B0] mt-0.5">
-                      {snap.activeTab} · {snap.selectedIds.length} modules · {snap.deploymentTarget} · {formatTimestamp(snap.updatedAt)}
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => restoreWorkspaceSnapshot(snap.id)}
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1C6E46] dark:hover:border-[#6FCB9F] cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" strokeWidth={1.6} />
+                        <span>Restore</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void deleteWorkspaceSnapshot(snap.id)}
+                        aria-label={`Delete snapshot ${snap.name}`}
+                        className="p-1.5 rounded-md text-[#5F6576] dark:text-[#8E96B0] hover:text-[#B91C1C] dark:hover:text-[#FCA5A5] hover:bg-[#FEF2F2] dark:hover:bg-[#2A1215] cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" strokeWidth={1.6} />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => restoreWorkspaceSnapshot(snap.id)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1C6E46] dark:hover:border-[#6FCB9F] cursor-pointer"
-                    >
-                      <RotateCcw className="w-3 h-3" strokeWidth={1.6} />
-                      <span>Restore</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void deleteWorkspaceSnapshot(snap.id)}
-                      aria-label={`Delete snapshot ${snap.name}`}
-                      className="p-1.5 rounded-md text-[#5F6576] dark:text-[#8E96B0] hover:text-[#B91C1C] dark:hover:text-[#FCA5A5] hover:bg-[#FEF2F2] dark:hover:bg-[#2A1215] cursor-pointer"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" strokeWidth={1.6} />
-                    </button>
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
       </div>
+
+      {/* Sync Event Log Viewer */}
+      <SyncEventLogViewer />
     </section>
   );
 }
