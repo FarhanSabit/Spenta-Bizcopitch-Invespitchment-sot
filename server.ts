@@ -249,8 +249,20 @@ async function startServer() {
     serveStatic();
   }
 
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     console.log(`Spenta Sovereign OS portal running on http://${HOST}:${PORT}`);
+  });
+
+  server.on('error', (err: NodeJS.ErrnoException) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`Port ${PORT} is already in use. Attempting to bind to port ${PORT + 1}...`);
+      app.listen(PORT + 1, HOST, () => {
+        console.log(`Spenta Sovereign OS portal running on http://${HOST}:${PORT + 1}`);
+      });
+    } else {
+      console.error('Server listen error:', err);
+      process.exit(1);
+    }
   });
 }
 

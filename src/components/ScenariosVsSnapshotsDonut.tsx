@@ -565,7 +565,7 @@ export function ScenariosVsSnapshotsDonut({
                       const payload = item?.payload as DonutCategoryData;
                       if (!payload) return ['-', 'Category'];
                       return [
-                        `${formatBytes(payload.bytes)} · ${payload.pctOfTwo.toFixed(1)}% of pair (${payload.count} item${payload.count === 1 ? '' : 's'}) · ${payload.pctOfTotalDb.toFixed(1)}% of total DB`,
+                        `Size: ${formatBytes(payload.bytes)} · ${payload.pctOfTotalDb.toFixed(2)}% of browser quota (${payload.count} item${payload.count === 1 ? '' : 's'})`,
                         payload.name,
                       ];
                     }}

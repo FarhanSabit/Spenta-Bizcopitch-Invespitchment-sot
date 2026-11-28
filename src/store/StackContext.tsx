@@ -639,6 +639,23 @@ interface StackContextValue {
   lastAutoCleanupPurgedCount: number;
   runSnapshotCleanup: (maxAgeDays?: number) => Promise<SnapshotCleanupResult>;
   investorBriefingCachedAt: string | null;
+  memoryStats: {
+    totalMemoryBytes: number;
+    scenariosMemoryBytes: number;
+    snapshotMemoryBytes: number;
+    browserStorageUsageBytes: number;
+    browserStorageQuotaBytes: number | null;
+    quotaUsagePct: number;
+  };
+  syncConflictState: {
+    open: boolean;
+    title: string;
+    detail: string;
+    localRevision: number;
+    serverRevision: number;
+  } | null;
+  triggerSyncConflictSimulation: () => void;
+  resolveSyncConflict: (choice: 'local' | 'server') => Promise<void>;
   // Internal developer performance & memory telemetry
   performanceMonitor: PerformanceMonitor;
   onProfilerRender: React.ProfilerOnRenderCallback;
@@ -1606,6 +1623,114 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
       setWorkspaceSnapshots((prev) => prev.filter((item) => item.id !== id));
     },
     [persistenceService, runTrackedPersistence],
+  );
+
+  const [memoryStats, setMemoryStats] = useState<{
+    totalMemoryBytes: number;
+    scenariosMemoryBytes: number;
+    snapshotMemoryBytes: number;
+    browserStorageUsageBytes: number;
+    browserStorageQuotaBytes: number | null;
+    quotaUsagePct: number;
+  }>({
+    totalMemoryBytes: 0,
+    scenariosMemoryBytes: 0,
+    snapshotMemoryBytes: 0,
+    browserStorageUsageBytes: 0,
+    browserStorageQuotaBytes: null,
+    quotaUsagePct: 0,
+  });
+
+  const [syncConflictState, setSyncConflictState] = useState<{
+    open: boolean;
+    title: string;
+    detail: string;
+    localRevision: number;
+    serverRevision: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const computeMemory = async () => {
+      const scenariosBytes = savedCalculatorScenarios.reduce(
+        (acc, s) => acc + JSON.stringify(s).length * 2,
+        0,
+      );
+      const snapshotsBytes = workspaceSnapshots.reduce(
+        (acc, sn) => acc + JSON.stringify(sn).length * 2,
+        0,
+      );
+      const totalObjBytes = scenariosBytes + snapshotsBytes;
+
+      let usageBytes = totalObjBytes;
+      let quotaBytes: number | null = null;
+
+      if (typeof navigator !== 'undefined' && navigator.storage && navigator.storage.estimate) {
+        try {
+          const est = await navigator.storage.estimate();
+          if (est.usage !== undefined) usageBytes = est.usage;
+          if (est.quota !== undefined) quotaBytes = est.quota ?? null;
+        } catch {
+          // ignore
+        }
+      }
+
+      const effectiveQuota = quotaBytes && quotaBytes > 0 ? quotaBytes : 50 * 1024 * 1024 * 1024;
+      const pct = effectiveQuota > 0 ? (usageBytes / effectiveQuota) * 100 : 0;
+
+      if (active) {
+        setMemoryStats({
+          totalMemoryBytes: totalObjBytes,
+          scenariosMemoryBytes: scenariosBytes,
+          snapshotMemoryBytes: snapshotsBytes,
+          browserStorageUsageBytes: usageBytes,
+          browserStorageQuotaBytes: quotaBytes,
+          quotaUsagePct: Math.min(100, Math.max(0, pct)),
+        });
+      }
+    };
+
+    void computeMemory();
+    const interval = window.setInterval(computeMemory, 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [savedCalculatorScenarios, workspaceSnapshots, storageRevision]);
+
+  const triggerSyncConflictSimulation = useCallback(() => {
+    setSyncConflictState({
+      open: true,
+      title: 'IndexedDB Schema Version & Sync Conflict Detected',
+      detail: `Local storage revision v${storageRevision} conflicts with incoming server state revision v${storageRevision + 2} due to concurrent update mismatch or data verification checksum error.`,
+      localRevision: storageRevision,
+      serverRevision: storageRevision + 2,
+    });
+  }, [storageRevision]);
+
+  const resolveSyncConflict = useCallback(
+    async (choice: 'local' | 'server') => {
+      if (choice === 'local') {
+        persistenceService.recordAuditEvent({
+          title: 'Sync conflict resolved: Keep Local',
+          detail: `User selected local state authoritative override at revision v${storageRevision}.`,
+          status: 'synced',
+          category: 'sync',
+        });
+        setAutoNotice('Conflict resolved — local storage state retained as authoritative.');
+      } else {
+        persistenceService.recordAuditEvent({
+          title: 'Sync conflict resolved: Overwrite with Server',
+          detail: `User accepted server state overwrite, synchronizing local cache.`,
+          status: 'synced',
+          category: 'sync',
+        });
+        await persistenceService.reconcileAndVerify();
+        setAutoNotice('Conflict resolved — local storage synchronized with server state.');
+      }
+      setSyncConflictState(null);
+    },
+    [persistenceService, storageRevision, setAutoNotice],
   );
 
   const getStorageMetrics = useCallback(() => {
@@ -2994,6 +3119,10 @@ export function StackProvider({ children }: { children: React.ReactNode }) {
         lastAutoCleanupPurgedCount,
         runSnapshotCleanup,
         investorBriefingCachedAt,
+        memoryStats,
+        syncConflictState,
+        triggerSyncConflictSimulation,
+        resolveSyncConflict,
         performanceMonitor,
         onProfilerRender,
         isInternalDeveloper,

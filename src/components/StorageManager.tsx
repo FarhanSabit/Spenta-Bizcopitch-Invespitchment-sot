@@ -46,6 +46,10 @@ import {
 } from '../utils/scenarioCsv';
 import { ScenariosVsSnapshotsDonut } from './ScenariosVsSnapshotsDonut';
 import { StorageGrowthHeatmap } from './StorageGrowthHeatmap';
+import { StorageTrendChart } from './StorageTrendChart';
+import { StorageQuotaAlertModal } from './StorageQuotaAlertModal';
+import { SyncConflictModal } from './SyncConflictModal';
+import { StorageDiagnosticsPanel } from './StorageDiagnosticsPanel';
 import { SyncEventLogViewer, SyncExportLogRecord } from './SyncEventLogViewer';
 
 const SYNC_EXPORT_LOG_STORAGE_KEY = 'spenta_sync_export_log_v1';
@@ -208,6 +212,10 @@ export function StorageManager() {
     personaTrack,
     buildShareUrl,
     setAutoNotice,
+    memoryStats,
+    syncConflictState,
+    triggerSyncConflictSimulation,
+    resolveSyncConflict,
   } = useStack();
 
   const [metrics, setMetrics] = useState<PersistenceStorageMetrics | null>(null);
@@ -237,6 +245,35 @@ export function StorageManager() {
   });
   const [importingCsv, setImportingCsv] = useState<boolean>(false);
   const csvFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [persistenceStrategy, setPersistenceStrategy] = useState<'space' | 'recall'>(() => {
+    try {
+      const stored = window.localStorage.getItem('spenta_persistence_strategy_v1');
+      return stored === 'recall' ? 'recall' : 'space';
+    } catch {
+      return 'space';
+    }
+  });
+  const [quotaAlertDismissed, setQuotaAlertDismissed] = useState<boolean>(false);
+
+  const handleTogglePersistenceStrategy = useCallback(
+    (strategy: 'space' | 'recall') => {
+      setPersistenceStrategy(strategy);
+      try {
+        window.localStorage.setItem('spenta_persistence_strategy_v1', strategy);
+      } catch {
+        // ignore
+      }
+      if (strategy === 'space') {
+        setAutoCleanupEnabled(true);
+        setAutoNotice('Cache Persistence Strategy set to "Optimize for Space" (Auto-cleanup enabled)');
+      } else {
+        setAutoCleanupEnabled(false);
+        setAutoNotice('Cache Persistence Strategy set to "Optimize for Recall" (All history retained)');
+      }
+    },
+    [setAutoCleanupEnabled, setAutoNotice],
+  );
 
   const handleToggleLogViewer = useCallback(() => {
     setShowLogViewer((prev) => {
@@ -831,6 +868,17 @@ export function StorageManager() {
               <span>Force Sync</span>
             </button>
 
+            <button
+              type="button"
+              data-testid="simulate-conflict-btn"
+              onClick={triggerSyncConflictSimulation}
+              title="Simulate an IndexedDB version mismatch / conflict error to test resolution modal"
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-[#FECACA] dark:border-[#7F1D1D] bg-[#FEF2F2] dark:bg-[#2A1215] text-[#B91C1C] dark:text-[#FCA5A5] hover:bg-[#FEE2E2] transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.6} />
+              <span>Simulate Conflict</span>
+            </button>
+
             <input
               ref={csvFileInputRef}
               type="file"
@@ -1038,6 +1086,63 @@ export function StorageManager() {
           </div>
         </div>
 
+        {/* Real-Time Memory Stats Telemetry Card (Size estimation API & live object memory footprint) */}
+        <div
+          data-testid="memory-stats-telemetry-card"
+          className="mt-4 p-4 rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529]"
+        >
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-[#E4DFD6] dark:border-[#232B4A]">
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-lg bg-[#ECFDF5] dark:bg-[#0D261C] text-[#1C6E46] dark:text-[#6FCB9F] flex items-center justify-center shrink-0">
+                <Database className="w-3.5 h-3.5" strokeWidth={1.8} />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-[#16213A] dark:text-[#E7EBF5]">
+                  Real-Time IndexedDB Memory Footprint (Size Estimation API)
+                </span>
+                <span className="text-[11px] text-[#5F6576] dark:text-[#8E96B0] block sm:inline sm:ml-2">
+                  (Scenarios vs. Workspace Snapshots active memory)
+                </span>
+              </div>
+            </div>
+            <span className="text-xs font-mono font-bold text-[#1C6E46] dark:text-[#6FCB9F] tabular-nums">
+              Total Object Footprint: {formatBytes(memoryStats.totalMemoryBytes)}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3 text-xs font-mono tabular-nums">
+            <div className="p-2.5 rounded-lg bg-white dark:bg-[#141A32] border border-[#E4DFD6] dark:border-[#232B4A]">
+              <span className="text-[10px] text-[#5F6576] dark:text-[#8E96B0] block">SAVED SCENARIOS MEMORY</span>
+              <span className="font-bold text-[#16213A] dark:text-[#E7EBF5] text-sm mt-0.5 block">
+                {formatBytes(memoryStats.scenariosMemoryBytes)}
+              </span>
+              <span className="text-[10px] text-[#7D8599] block mt-0.5">
+                ({savedCalculatorScenarios.length} scenarios)
+              </span>
+            </div>
+
+            <div className="p-2.5 rounded-lg bg-white dark:bg-[#141A32] border border-[#E4DFD6] dark:border-[#232B4A]">
+              <span className="text-[10px] text-[#5F6576] dark:text-[#8E96B0] block">WORKSPACE SNAPSHOTS MEMORY</span>
+              <span className="font-bold text-[#16213A] dark:text-[#E7EBF5] text-sm mt-0.5 block">
+                {formatBytes(memoryStats.snapshotMemoryBytes)}
+              </span>
+              <span className="text-[10px] text-[#7D8599] block mt-0.5">
+                ({workspaceSnapshots.length} snapshots)
+              </span>
+            </div>
+
+            <div className="p-2.5 rounded-lg bg-white dark:bg-[#141A32] border border-[#E4DFD6] dark:border-[#232B4A]">
+              <span className="text-[10px] text-[#5F6576] dark:text-[#8E96B0] block">STORAGE ESTIMATE API USAGE</span>
+              <span className="font-bold text-[#1C6E46] dark:text-[#6FCB9F] text-sm mt-0.5 block">
+                {formatBytes(memoryStats.browserStorageUsageBytes)}
+              </span>
+              <span className="text-[10px] text-[#7D8599] block mt-0.5">
+                {memoryStats.browserStorageQuotaBytes ? `Quota: ${formatBytes(memoryStats.browserStorageQuotaBytes)}` : 'Standard Quota Fallback'}
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* 4-Column KPI Summary Strip (Tabular Numerals) */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-5">
           <div className="p-4 rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529]">
@@ -1140,6 +1245,20 @@ export function StorageManager() {
         scenarios={savedCalculatorScenarios}
         snapshots={workspaceSnapshots}
         totalDbBytes={metrics?.estimatedPayloadBytes ?? 0}
+      />
+
+      {/* 30-Day Storage Growth & Projection Trend (D3.js Line Chart) */}
+      <StorageTrendChart
+        scenarios={savedCalculatorScenarios}
+        snapshots={workspaceSnapshots}
+        isDark={isDark}
+      />
+
+      {/* Storage Diagnostics & IndexedDB Inspector Panel */}
+      <StorageDiagnosticsPanel
+        metrics={metrics}
+        onRefresh={() => void refreshMetrics()}
+        loading={loading}
       />
 
       {/* Storage Breakdown by Item Type (Recharts Donut + Ranked Horizontal Bar Chart) */}
@@ -1815,6 +1934,60 @@ export function StorageManager() {
             </span>
           </div>
 
+          {/* Cache Persistence Strategy Toggle ('Optimize for Space' vs 'Optimize for Recall') */}
+          <div
+            data-testid="persistence-strategy-panel"
+            className="mt-3 rounded-xl border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] px-3.5 py-2.5 space-y-2"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2.5 min-w-0">
+                <Database
+                  className="w-3.5 h-3.5 text-[#1F3863] dark:text-[#8FA6E8] mt-0.5 shrink-0"
+                  strokeWidth={1.75}
+                />
+                <div className="min-w-0">
+                  <div className="text-xs font-semibold text-[#16213A] dark:text-[#E7EBF5]">
+                    Cache Persistence Strategy
+                  </div>
+                  <p className="text-[11px] text-[#5F6576] dark:text-[#8E96B0] leading-snug">
+                    Choose between &apos;Optimize for Space&apos; (auto-purge old snapshots) or &apos;Optimize for Recall&apos; (keep all history).
+                  </p>
+                </div>
+              </div>
+
+              <div
+                role="group"
+                aria-label="Cache Persistence Strategy"
+                className="inline-flex items-center rounded-lg bg-[#E4DFD6] dark:bg-[#0F1529] p-0.5 border border-[#D5CEC2] dark:border-[#232B4A]"
+              >
+                <button
+                  type="button"
+                  data-testid="strategy-space-btn"
+                  onClick={() => handleTogglePersistenceStrategy('space')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    persistenceStrategy === 'space'
+                      ? 'bg-[#1F3863] text-white dark:bg-[#8FA6E8] dark:text-[#0B1020] shadow-xs'
+                      : 'text-[#5F6576] dark:text-[#8E96B0] hover:text-[#16213A]'
+                  }`}
+                >
+                  Optimize for Space
+                </button>
+                <button
+                  type="button"
+                  data-testid="strategy-recall-btn"
+                  onClick={() => handleTogglePersistenceStrategy('recall')}
+                  className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+                    persistenceStrategy === 'recall'
+                      ? 'bg-[#1F3863] text-white dark:bg-[#8FA6E8] dark:text-[#0B1020] shadow-xs'
+                      : 'text-[#5F6576] dark:text-[#8E96B0] hover:text-[#16213A]'
+                  }`}
+                >
+                  Optimize for Recall
+                </button>
+              </div>
+            </div>
+          </div>
+
           {/* 30-Day Snapshot Auto-Cleanup Policy Control */}
           <div
             data-testid="auto-cleanup-panel"
@@ -2132,6 +2305,28 @@ export function StorageManager() {
           </div>
         </div>
       )}
+
+      {/* Storage Quota Alert Modal (triggers when IndexedDB usage exceeds 80% of browser estimated quota) */}
+      <StorageQuotaAlertModal
+        isOpen={quotaUsagePct >= 80 && !quotaAlertDismissed}
+        usagePct={quotaUsagePct}
+        usedBytes={effectiveUsageBytes}
+        quotaBytes={effectiveQuotaBytes}
+        onClose={() => setQuotaAlertDismissed(true)}
+        onRunCleanup={() => void handleManualCleanupNow()}
+        onOptimizeSpace={() => handleTogglePersistenceStrategy('space')}
+      />
+
+      {/* Conflict Resolution Modal (Appears when IndexedDB sync fails due to version mismatch or data corruption) */}
+      <SyncConflictModal
+        isOpen={Boolean(syncConflictState?.open)}
+        title={syncConflictState?.title ?? 'Sync Conflict'}
+        detail={syncConflictState?.detail ?? ''}
+        localRevision={syncConflictState?.localRevision ?? 1}
+        serverRevision={syncConflictState?.serverRevision ?? 2}
+        onKeepLocal={() => void resolveSyncConflict('local')}
+        onOverwriteServer={() => void resolveSyncConflict('server')}
+      />
     </section>
   );
 }

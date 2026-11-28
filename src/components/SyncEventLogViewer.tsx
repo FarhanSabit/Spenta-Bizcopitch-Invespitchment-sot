@@ -59,7 +59,7 @@ interface SyncEventLogViewerProps {
   onClearExports?: () => void;
 }
 
-type LogFilter = 'all' | 'scenarios' | 'cleanups' | 'sync_errors' | 'exports';
+type LogFilter = 'all' | 'scenarios' | 'cleanups' | 'sync_errors' | 'exports' | 'offline_sync';
 
 function formatLogTime(iso: string): string {
   try {
@@ -179,6 +179,29 @@ export function SyncEventLogViewer({
     setAuditEvents([]);
   };
 
+  const handleExportLogsCsv = () => {
+    if (allEntries.length === 0) return;
+    const headers = ['Timestamp', 'Event Type', 'Status', 'Title', 'Detail'];
+    const rows = allEntries.map((e) => [
+      `"${e.timestamp}"`,
+      `"${e.eventType}"`,
+      `"${e.status}"`,
+      `"${e.title.replace(/"/g, '""')}"`,
+      `"${e.detail.replace(/"/g, '""')}"`,
+    ]);
+    const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    a.download = `spenta-sync-audit-logs-${dateStamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
   // Merge native audit events with any explicit export records
   const allEntries = useMemo<SyncLogEntry[]>(() => {
     const fromAudit: SyncLogEntry[] = auditEvents.map((evt) => ({
@@ -255,6 +278,15 @@ export function SyncEventLogViewer({
           item.eventType === 'export' ||
           item.title.toLowerCase().includes('export');
         if (!isExport) return false;
+      } else if (filter === 'offline_sync') {
+        const isOffline =
+          item.status === 'offline' ||
+          item.eventType === 'sync' ||
+          item.title.toLowerCase().includes('offline') ||
+          item.detail.toLowerCase().includes('offline') ||
+          item.detail.toLowerCase().includes('queue') ||
+          item.detail.toLowerCase().includes('reconnect');
+        if (!isOffline) return false;
       }
 
       // Keyword query filter
@@ -291,6 +323,15 @@ export function SyncEventLogViewer({
       ).length,
       exports: allEntries.filter(
         (e) => e.eventType === 'export' || e.title.toLowerCase().includes('export'),
+      ).length,
+      offline_sync: allEntries.filter(
+        (e) =>
+          e.status === 'offline' ||
+          e.eventType === 'sync' ||
+          e.title.toLowerCase().includes('offline') ||
+          e.detail.toLowerCase().includes('offline') ||
+          e.detail.toLowerCase().includes('queue') ||
+          e.detail.toLowerCase().includes('reconnect'),
       ).length,
     };
   }, [allEntries]);
@@ -348,6 +389,18 @@ export function SyncEventLogViewer({
 
           <button
             type="button"
+            data-testid="sync-log-export-csv-btn"
+            onClick={handleExportLogsCsv}
+            disabled={allEntries.length === 0}
+            title="Export chronological sync event logs as CSV for audit"
+            className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-semibold border border-[#E4DFD6] dark:border-[#232B4A] bg-[#FAF8F4] dark:bg-[#0F1529] text-[#16213A] dark:text-[#E7EBF5] hover:border-[#1F3863] dark:hover:border-[#8FA6E8] transition-colors cursor-pointer disabled:opacity-45 disabled:cursor-not-allowed whitespace-nowrap"
+          >
+            <Download className="w-3 h-3" strokeWidth={1.6} />
+            <span>Export Logs</span>
+          </button>
+
+          <button
+            type="button"
             data-testid="sync-log-clear-btn"
             onClick={handleClearAllLogs}
             disabled={allEntries.length === 0}
@@ -374,6 +427,7 @@ export function SyncEventLogViewer({
               { id: 'cleanups', label: 'Auto-Cleanups', count: counts.cleanups },
               { id: 'sync_errors', label: 'Sync & Errors', count: counts.sync_errors },
               { id: 'exports', label: 'Exports', count: counts.exports },
+              { id: 'offline_sync', label: 'Offline Sync History', count: counts.offline_sync },
             ] as const
           ).map((tab) => (
             <button
